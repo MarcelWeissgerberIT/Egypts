@@ -243,7 +243,9 @@ export class UI {
 
 // ------------------------------------------------------------------ iso stone drawing
 // Draws polyomino stones with the same projection as the 3D camera (axes in px per world unit).
-export function drawPiece(ctx, piece, ox, oy, ax, H, imgs, alpha = 1, scale = 1) {
+// The texture transforms are applied with ctx.transform() on top of the caller's transform, so the
+// stones render correctly on high-DPI canvases (the caller scales by devicePixelRatio).
+export function drawPiece(ctx, piece, ox, oy, ax, H, imgs, alpha = 1, scale = 1, opts = {}) {
   const ex = { x: ax.ex.x * scale, y: ax.ex.y * scale };
   const ez = { x: ax.ez.x * scale, y: ax.ez.y * scale };
   const ey = { x: ax.ey.x * scale * H, y: ax.ey.y * scale * H };
@@ -251,38 +253,46 @@ export function drawPiece(ctx, piece, ox, oy, ax, H, imgs, alpha = 1, scale = 1)
   const cells = [...piece.cells].sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
   const P = (x, z, up) => ({ x: ox + x * ex.x + z * ez.x + (up ? ey.x : 0), y: oy + x * ex.y + z * ez.y + (up ? ey.y : 0) });
   const quad = (a, b, c, d) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath(); };
+  const cellLen = Math.hypot(ex.x, ex.y);
+  const iw = img.width, ih = img.height;
+  const face = (pts, m, shade) => {
+    ctx.save();
+    quad(...pts); ctx.clip();
+    ctx.save(); ctx.transform(m[0] / iw, m[1] / iw, m[2] / ih, m[3] / ih, m[4], m[5]); ctx.drawImage(img, 0, 0); ctx.restore();
+    ctx.fillStyle = shade; ctx.fill();
+    ctx.restore();
+  };
   ctx.save();
   ctx.globalAlpha = alpha;
-  const iw = img.width, ih = img.height;
+  ctx.lineJoin = 'round';
+  // 1) silhouette: thick dark-violet rim (+ optional golden glow) around the whole stone
+  ctx.save();
+  if (opts.glow) { ctx.shadowColor = piece.gold ? 'rgba(255,210,90,0.95)' : 'rgba(255,214,140,0.75)'; ctx.shadowBlur = cellLen * 0.45; }
+  ctx.fillStyle = '#2a0f45';
+  ctx.strokeStyle = '#2a0f45';
+  ctx.lineWidth = Math.max(2.5, cellLen * 0.11);
   for (const [x, z] of cells) {
-    // +X side face
+    const t0 = P(x, z, true), t1 = P(x + 1, z, true), d = P(x + 1, z, false), c = P(x + 1, z + 1, false), h = P(x, z + 1, false), t3 = P(x, z + 1, true);
+    ctx.beginPath(); ctx.moveTo(t0.x, t0.y); ctx.lineTo(t1.x, t1.y); ctx.lineTo(d.x, d.y); ctx.lineTo(c.x, c.y); ctx.lineTo(h.x, h.y); ctx.lineTo(t3.x, t3.y); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+  // 2) textured faces, back to front
+  for (const [x, z] of cells) {
     const a = P(x + 1, z, true), b = P(x + 1, z + 1, true), c = P(x + 1, z + 1, false), d = P(x + 1, z, false);
-    ctx.save(); quad(a, b, c, d); ctx.clip();
-    ctx.setTransform(ez.x / iw, ez.y / iw, -ey.x / ih, -ey.y / ih, a.x, a.y);
-    ctx.drawImage(img, 0, 0);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = 'rgba(60,20,90,0.30)'; ctx.fill();
-    ctx.restore();
-    // +Z side face
+    face([a, b, c, d], [ez.x, ez.y, -ey.x, -ey.y, a.x, a.y], 'rgba(50,14,85,0.42)');
     const e = P(x, z + 1, true), f = P(x + 1, z + 1, true), g = P(x + 1, z + 1, false), h = P(x, z + 1, false);
-    ctx.save(); quad(e, f, g, h); ctx.clip();
-    ctx.setTransform(ex.x / iw, ex.y / iw, -ey.x / ih, -ey.y / ih, e.x, e.y);
-    ctx.drawImage(img, 0, 0);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = 'rgba(90,40,120,0.16)'; ctx.fill();
-    ctx.restore();
-    // top face
+    face([e, f, g, h], [ex.x, ex.y, -ey.x, -ey.y, e.x, e.y], 'rgba(70,24,105,0.24)');
     const t0 = P(x, z, true), t1 = P(x + 1, z, true), t2 = P(x + 1, z + 1, true), t3 = P(x, z + 1, true);
-    ctx.save(); quad(t0, t1, t2, t3); ctx.clip();
-    ctx.setTransform(ex.x / iw, ex.y / iw, ez.x / ih, ez.y / ih, t0.x, t0.y);
-    ctx.drawImage(img, 0, 0);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = 'rgba(255,240,210,0.10)'; ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle = piece.gold ? 'rgba(120,60,0,0.55)' : 'rgba(90,50,40,0.45)';
-    ctx.lineWidth = 1;
+    face([t0, t1, t2, t3], [ex.x, ex.y, ez.x, ez.y, t0.x, t0.y], 'rgba(255,246,225,0.12)');
+    // block edges
+    ctx.strokeStyle = piece.gold ? 'rgba(110,50,0,0.8)' : 'rgba(80,40,40,0.7)';
+    ctx.lineWidth = Math.max(1, cellLen * 0.035);
     quad(t0, t1, t2, t3); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(t1.x, t1.y); ctx.lineTo(d.x, d.y); ctx.lineTo(c.x, c.y); ctx.lineTo(h.x, h.y); ctx.lineTo(t3.x, t3.y); ctx.moveTo(t2.x, t2.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(t2.x, t2.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+    // bright bevel highlight on the top face's back edges
+    ctx.strokeStyle = piece.gold ? 'rgba(255,250,200,0.75)' : 'rgba(255,250,235,0.6)';
+    ctx.beginPath(); ctx.moveTo(t3.x, t3.y); ctx.lineTo(t0.x, t0.y); ctx.lineTo(t1.x, t1.y); ctx.stroke();
   }
   ctx.restore();
 }

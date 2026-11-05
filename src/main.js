@@ -344,7 +344,7 @@ class Game {
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.shadowColor = 'rgba(20,0,40,0.5)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 10;
-    drawPiece(ctx, this.drag.piece, g.ox, g.oy, g.ax, H, this.assets.img, this.drag.anchor ? 0.55 : 0.95, g.scale);
+    drawPiece(ctx, this.drag.piece, g.ox, g.oy, g.ax, H, this.assets.img, this.drag.anchor ? 0.6 : 0.97, g.scale);
   }
   _clearDrag() {
     const c = this.ui.dragCanvas, ctx = c.getContext('2d');
@@ -514,19 +514,23 @@ class Game {
     const ax = this.world.screenAxes();
     const w = this.vw, h = this.trayH;
     const sw = (w - 24) / 3;
-    // one scale for all stones so sizes compare honestly
-    const ref = pieceScreenSize({ cells: [[0, 0], [2, 2]] }, ax, H, 1);
+    // one scale for all three stones (so sizes compare honestly), as large as the slots allow
     const innerH = h - 30;
-    this.trayScale = Math.min(1.3, (sw * 0.94) / ref.w, (innerH * 0.9) / ref.h);
+    let rw = pieceScreenSize({ cells: [[0, 0], [1, 1]] }, ax, H, 1).w, rh = pieceScreenSize({ cells: [[0, 0], [1, 1]] }, ax, H, 1).h;
+    for (const p of this.tray) if (p) { const z = pieceScreenSize(p, ax, H, 1); rw = Math.max(rw, z.w); rh = Math.max(rh, z.h); }
+    const target = Math.min(1.9, (sw * 0.86) / rw, (innerH * 0.86) / rh);
+    // ease towards the new scale so the tray does not jump when stones change
+    this.trayScale = this.trayScale ? this.trayScale + (target - this.trayScale) * 0.35 : target;
+    if (Math.abs(this.trayScale - target) > 0.01) this._scaleEasing = true; else { this.trayScale = target; this._scaleEasing = false; }
     const now = performance.now();
     for (let k = 0; k < 3; k++) {
       const p = this.tray[k];
       const cx = 12 + sw * (k + 0.5), cy = 14 + innerH * 0.52;
       // slot plate
       ctx.save();
-      ctx.beginPath(); ctx.ellipse(cx, cy + innerH * 0.18, sw * 0.38, innerH * 0.14, 0, 0, Math.PI * 2);
-      const gr = ctx.createRadialGradient(cx, cy + innerH * 0.18, 4, cx, cy + innerH * 0.18, sw * 0.4);
-      gr.addColorStop(0, 'rgba(190,120,255,0.35)'); gr.addColorStop(1, 'rgba(190,120,255,0)');
+      ctx.beginPath(); ctx.ellipse(cx, cy + innerH * 0.26, sw * 0.42, innerH * 0.16, 0, 0, Math.PI * 2);
+      const gr = ctx.createRadialGradient(cx, cy + innerH * 0.26, 4, cx, cy + innerH * 0.26, sw * 0.44);
+      gr.addColorStop(0, 'rgba(200,140,255,0.45)'); gr.addColorStop(1, 'rgba(190,120,255,0)');
       ctx.fillStyle = gr; ctx.fill();
       ctx.restore();
       if (!p || (this.drag && this.drag.k === k)) continue;
@@ -536,10 +540,10 @@ class Game {
       if (p.born && now - p.born < 300) s *= 0.4 + 0.6 * Math.min(1, (now - p.born) / 300);
       const cen = pieceCentroid(p, ax, s);
       const size = pieceScreenSize(p, ax, H, s);
-      const ox = cx - cen.x, oy = cy - (size.minY + size.h / 2) + 0;
+      const ox = cx - (size.minX + size.w / 2), oy = cy - (size.minY + size.h / 2);
       ctx.save();
-      if (!fits) ctx.filter = 'grayscale(0.85) brightness(0.6)';
-      drawPiece(ctx, p, ox, oy, ax, H, this.assets.img, fits ? 1 : 0.42, s);
+      if (!fits) ctx.filter = 'grayscale(0.85) brightness(0.65)';
+      drawPiece(ctx, p, ox, oy, ax, H, this.assets.img, fits ? 1 : 0.5, s, { glow: fits });
       ctx.restore();
       if (fits && !fitsNow) {
         // hint: only fits after turning
@@ -549,7 +553,7 @@ class Game {
         ctx.globalAlpha = 1;
       }
     }
-    this._trayAnimating = this.tray.some((p) => p && p.born && now - p.born < 320) || this.tray.some((p) => p && this.tier && this.fitsAny(p) && !this.tier.anyFit(p.cells));
+    this._trayAnimating = this._scaleEasing || this.tray.some((p) => p && p.born && now - p.born < 320) || this.tray.some((p) => p && this.tier && this.fitsAny(p) && !this.tier.anyFit(p.cells));
   }
 
   // ------------------------------------------------------------ main loop
