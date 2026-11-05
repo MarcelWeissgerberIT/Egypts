@@ -13,3 +13,4 @@
 "brazier":"d52682ba-227e-4bfd-bf8a-b7aed7f8d061"}}
 {"rig":{"worker_walk":"a42c88af-2cf1-4132-8ee3-4dbbd0455748","worker_cheer":"69e2d9c5-2b28-4546-b19a-ed16a183f475","worker_idle":"6848bba5-eefb-496e-985a-81778a17b572","pharaoh_cheer":"3b724177-d76f-4884-a6a5-5fe1febea633","pharaoh_stomp":"24a8694c-f4c0-441d-8479-63a06b6f2098","priestess_cast":"de1f45d4-c687-4c9c-b428-e356eae75299","priestess_dance":"7087fd0a-33e0-4f9f-a58c-4f8f9d3da141"},
 "audio":{"music":"c5b05efe-4ccd-40aa-bace-ddbfd310053e","fanfare":"a560a451-0f63-4764-94d3-4e9702070cb1"}}
+{"buildings":{"house":"cfed9863-cd0c-4ca1-878f-6c8f6fd1c255","farm":"e29ac20b-ae6f-4999-8631-7f58d76456fe","bakery":"f1f24a29-421f-4e9f-91a2-d18051d961ea","quarry":"fb9b7200-ae1e-4d7f-bb36-688f931317bc","mason":"a82753c6-edae-4353-8b20-9600d48f6eca","mine":"438bb42b-3dcd-42ad-9af8-72794d20eb25","smithy":"61585791-c68f-4c53-9eb3-3cd0353b17c3"}}

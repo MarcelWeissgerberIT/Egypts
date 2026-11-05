@@ -150,6 +150,14 @@ export class Audio {
     if (gold) { this._tone(1568, 'sine', t + 0.03, 0.003, 0.12, 0.5); this._tone(2093, 'sine', t + 0.07, 0.003, 0.08, 0.5); }
   }
 
+  block() {
+    if (!this.ok()) return; const t = this.ctx.currentTime;
+    const o = this._tone(95, 'sine', t, 0.004, 0.35, 0.22);
+    o.frequency.exponentialRampToValueAtTime(50, t + 0.2);
+    this._noise(t, 0.12, 0.22, 'lowpass', 600);
+    this._tone(1760, 'sine', t + 0.05, 0.002, 0.05, 0.25); // coin glint
+  }
+
   snap() {
     if (!this.ok()) return; const t = this.ctx.currentTime;
     this._tone(1320, 'sine', t, 0.002, 0.05, 0.04);

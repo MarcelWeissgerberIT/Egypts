@@ -1,40 +1,41 @@
-// Balancing helper: a greedy bot plays every level many times with the real rules
-// (new stones only after all three are used, shuffle on dead ends) and reports how many
-// seconds per move each level grants. Run: node tools/balance_sim.mjs
+// Balancing helper: a scripted builder plays each production level with the real economy
+// and reports how long it needs. Deadlines in src/levels.js are set from these times.
+// Run: node tools/balance_sim.mjs
 import { LEVELS, tierSizes } from '../src/levels.js';
-import { Tier } from '../src/logic.js';
-import { randomPiece, rotate, makePiece } from '../src/pieces.js';
+import { PLOTS } from '../src/plots.js';
+import { Economy, DEFS, upgradeCost, cycleOf } from '../src/economy.js';
 
-const TARGET = [3.6, 3.2, 3.0, 2.8, 2.6, 2.4];   // intended seconds per move incl. bonuses
-const fitsAny = (T, p) => { let c = p.cells; for (let r = 0; r < 4; r++) { if (T.anyFit(c)) return true; c = rotate(c); } return false; };
-for (const [li, L] of LEVELS.entries()) {
-  const runs = 300;
-  let shuffles = 0, places = 0, cells = 0, lines = 0, ankhs = 0, tiers = 0, budget = 0;
-  for (let run = 0; run < runs; run++) {
-    for (const [t, n] of tierSizes(L.base).entries()) {
-      const T = new Tier(n, t); T.setup(L.granite[t] || 0, L.ankhs[t] || 0, Math.random);
-      tiers++; cells += T.emptyCount(); ankhs += T.ankhs.size;
-      budget += T.emptyCount() * L.secPerCell + 3;
-      const gen = (ensure) => { for (let a = 0; a < (ensure ? 60 : 1); a++) { const p = randomPiece(L.set, n, T.emptyCount(), L.gold); if (!ensure || fitsAny(T, p)) return p; } return makePiece('o1'); };
-      let tray = [null, null, null];
-      const refillAll = () => { tray = [gen(false), gen(false), gen(false)]; if (!tray.some((p) => fitsAny(T, p)) && Math.random() < L.fair) tray[Math.floor(Math.random() * 3)] = gen(true); };
-      refillAll();
-      let guard = 0;
-      while (!T.full() && guard++ < 800) {
-        let best = null;
-        tray.forEach((p, k) => { if (!p) return; let c = p.cells; for (let r = 0; r < 4; r++) { for (let aj = 0; aj < n; aj++) for (let ai = 0; ai < n; ai++) if (T.canPlace(c, ai, aj)) {
-          let sc = 0; for (const [x, y] of c) { const i = ai + x, j = aj + y; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + dx, b = j + dy; if (!T.inside(a, b) || T.get(a, b)) sc++; } }
-          sc += c.length * 0.5 + Math.random() * 0.5;
-          if (!best || sc > best.sc) best = { sc, k, c, ai, aj }; } c = rotate(c); } });
-        if (!best) { shuffles++; tray = [gen(true), gen(false), gen(false)]; continue; }
-        const r = T.place(best.c, best.ai, best.aj, 1); lines += r.rows.length + r.cols.length; places++;
-        tray[best.k] = null;
-        if (tray.every((p) => !p)) refillAll();
-      }
-    }
+function bot(E) {
+  const L = E.L;
+  const has = (t) => E.buildings.filter((b) => b.type === t);
+  const freePlot = (terrain) => PLOTS.find((p) => p.terrain === terrain && E.plotFree(p.id));
+  const rate = (t) => has(t).filter((b) => b.built).reduce((a, b) => a + 1 / cycleOf(t, b.level), 0);
+  const tryBuild = (t) => { const p = freePlot(DEFS[t].terrain); if (p && E.canBuild(t, p.id)) { E.build(t, p.id); return true; } return false; };
+  const tryUp = (t) => { const bs = has(t).filter((b) => E.canUpgrade(b)).sort((a, b) => a.level - b.level); if (bs[0]) { E.upgrade(bs[0]); return true; } return false; };
+  const grow = (t) => tryBuild(t) || tryUp(t);
+  if (!has('mason').length) { grow('mason'); return; }
+  if (!has('quarry').length) { grow('quarry'); return; }
+  if (E.workersFree() < 2) { if (grow('house')) return; if (E.deben < 30) return; }
+  const eat = has('house').reduce((a, b) => a + (1 + 0.4 * (b.level - 1)) / DEFS.house.eat, 0);
+  const bread = rate('bakery') * 2, grain = rate('farm');
+  if (bread < eat * 1.15) { if (grain < rate('bakery') * 1.1 + 0.05) { if (grow('farm')) return; } else if (grow('bakery')) return; return; }
+  if (grain < rate('bakery')) { if (grow('farm')) return; }
+  if (L.tools) {
+    const toolNeed = rate('quarry') / 4, tools = rate('smithy') * 2;
+    if (tools < toolNeed * 1.1) { if (rate('mine') < rate('smithy') + 0.02) { if (grow('mine')) return; } else if (grow('smithy')) return; return; }
   }
-  const m = places / runs;
-  const spc = (TARGET[li] * places - 3 * tiers - lines - 3 * ankhs) / cells;
-  const eff = (budget + lines + 3 * ankhs) / places;
-  console.log(`L${li + 1} base ${L.base}: moves ${m.toFixed(1)}, shuffles ${(shuffles / runs).toFixed(2)}, current ${eff.toFixed(2)} s/move, secPerCell for target ${TARGET[li]}: ${spc.toFixed(2)}`);
+  if (rate('quarry') <= rate('mason')) { if (grow('quarry')) return; } else if (grow('mason')) return;
+}
+
+for (const [i, L] of LEVELS.entries()) {
+  const times = [];
+  for (let run = 0; run < 5; run++) {
+    const E = new Economy(L, PLOTS, tierSizes(L.base).map((n) => n * n));
+    for (const [t, p] of L.prebuilt) E.build(t, p, { free: true, instant: true });
+    let t = 0;
+    while (!E.done() && t < 3000) { if (Math.floor(t * 2) % 2 === 0) bot(E); E.step(0.5); t += 0.5; }
+    times.push(t);
+  }
+  const avg = times.reduce((a, b) => a + b, 0) / times.length;
+  console.log(`L${i + 1} base ${L.base}: bot finishes in ${avg.toFixed(0)} s (deadline ${L.deadline} s, ratio ${(L.deadline / avg).toFixed(2)})`);
 }

@@ -8,24 +8,37 @@ Ziffern, 3D-Figuren, Musik und Fanfare wurden mit **Higgsfield** erzeugt, die 3D
 Rigs und Animationen mit **Meshy** (über Higgsfield). Im Spiel gibt es keine Schrift: jede
 Beschriftung, jede Zahl und jeder Knopf ist ein Bild.
 
-## Spielprinzip
+## Spielprinzip – Pyramidenwerk
 
-* Jede Pyramide besteht aus Stufen (z. B. 7×7 → 5×5 → 3×3). Ganz oben setzt du als Belohnung
-  die goldene Spitze.
-* Unten liegen drei Steine. **Ziehen** legt einen Stein auf die aktuelle Stufe: Der violett
-  umrandete Vorschau-Stein zeigt genau, wo er landet, goldenes Leuchten zeigt Reihen und Spalten,
-  die dadurch fertig würden. **Antippen** dreht einen Stein um 90°.
-* Neue Steine gibt es erst, wenn alle drei verbaut sind – die Reihenfolge will geplant sein.
-* Die **Sonnenleiste** ist die Zeit für die Stufe: Der Tag läuft ab, der Himmel färbt sich purpur.
-  Geht die Sonne unter, verlierst du einen **Skarabäus** (3 Leben).
-* Volle Reihen und Spalten geben Punkte und etwas Sonnenzeit, mehrere hintereinander einen
-  Kombo-Multiplikator.
-* **Ankh-Felder** abdecken: viel Sonnenzeit und Punkte, die Priesterin wirkt einen Segen.
-* **Goldsteine** zählen dreifach. Roter **Granit** ist schon verbaut und macht die Formen kniffliger.
-* Passt kein Stein mehr? Der **Nil-Knopf** spült alle drei Steine fort (kostet 7 Sekunden Sonne).
-* Wertung: 3 Horusaugen nur ohne verlorenen Skarabäus und mit mindestens einem Viertel
-  Sonnenzeit übrig, 2 Augen mit höchstens einem verlorenen Skarabäus. 6 Level, steigende
-  Schwierigkeit (knappere Zeit, mehr Granit, seltener garantiert passende Steine).
+Du baust eine Produktionswirtschaft auf, die die Pyramide Block für Block wachsen lässt.
+
+* **Bauplätze antippen** öffnet das Baumenü (nur passende Gebäude für Sand, Fels oder Nilufer).
+  Jede Karte zeigt Kosten in Deben, benötigte Arbeiter und die Produktionskette als Symbole.
+* **Gebäude antippen** zeigt Stufe, Produktion und den Ausbau (schneller, braucht +1 Arbeiter).
+* **Wischen** verschiebt die Kamera, **zwei Finger** zoomen, der Knopf unten rechts schaltet
+  die Geschwindigkeit (x1, x2, x3).
+
+Produktionsketten:
+
+| Gebäude | Bauplatz | Verbraucht | Erzeugt |
+|---|---|---|---|
+| Arbeiterhaus | Sand | Brot | Arbeiter |
+| Getreidefeld | Nilufer | – | Getreide |
+| Bäckerei | Sand | Getreide | Brot |
+| Steinbruch | Fels | (Werkzeug ab Level 3) | Rohstein |
+| Steinmetz | Sand | Rohstein | Quader |
+| Kupfermine | Fels | – | Erz |
+| Schmiede | Sand | Erz | Werkzeug |
+
+* Quader ziehen Arbeiter auf Schlitten zur Pyramide. Jeder verbaute Quader bringt Deben,
+  jede fertige Stufe einen Bonus. Ganz oben setzt du die goldene Spitze.
+* Ohne Brot streiken die Arbeiter (die Produktion halbiert sich etwa), ohne Werkzeug arbeitet
+  der Steinbruch viel langsamer.
+* Die **Nilflut** setzt die Felder regelmäßig unter Wasser, danach wächst das Getreide schneller.
+  In Level 5 bremsen zusätzlich **Sandstürme**.
+* Die Sonnenleiste ist die Regierungszeit des Pharaos. Horusaugen: 3 bei Fertigstellung in
+  höchstens 75 % der Zeit, 2 bei höchstens 90 %.
+* Die Fristen sind mit `tools/balance_sim.mjs` (ein Bot, der nach Regeln baut) eingestellt.
 
 ## Entwickeln
 
@@ -37,7 +50,7 @@ node tools/serve.cjs dist  # http://localhost:8080
 
 | Ordner | Inhalt |
 |---|---|
-| `src/` | Spielcode (Three.js): `world.js` 3D-Diorama, `main.js` Spielablauf/Steuerung, `ui.js` bildbasierte Oberfläche, `logic.js`/`pieces.js`/`levels.js` Puzzle-Regeln, `audio.js` Musik und erzeugte Klänge |
+| `src/` | Spielcode (Three.js): `world.js` 3D-Diorama, `main.js` Spielablauf/Steuerung, `ui.js` bildbasierte Oberfläche, `economy.js` Produktionswirtschaft, `levels.js`/`plots.js` Level und Bauplätze, `audio.js` Musik und erzeugte Klänge |
 | `public/assets/` | aufbereitete Assets (WebP/JPG, meshopt-komprimierte GLBs, MP3) |
 | `tools/` | Bild-/Modell-Aufbereitung, Build, lokaler Server, Balancing-Simulation |
 | `art/jobs.json` | Higgsfield/Meshy-Job-IDs der Rohdateien |

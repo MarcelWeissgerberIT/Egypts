@@ -1,15 +1,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { World, H } from './world.js';
-import { UI, drawPiece, pieceCentroid, pieceScreenSize } from './ui.js';
+import { World } from './world.js';
+import { UI } from './ui.js';
 import { Audio } from './audio.js';
 import { LEVELS, tierSizes } from './levels.js';
-import { Tier, STONE, GOLD } from './logic.js';
-import { randomPiece, rotatePiece, rotate, makePiece } from './pieces.js';
+import { PLOTS } from './plots.js';
+import { Economy, DEFS, MAX_LEVEL, upgradeCost, staffFor, cycleOf, BLOCK_PAY, TIER_PAY } from './economy.js';
 
-const SAVE_KEY = 'purple-sun-pyramid-v1';
-const SHUFFLE_COST = 7;
+const SAVE_KEY = 'purple-sun-works-v1';
+const BUILDINGS = ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy'];
 
 function loadSave() {
   try {
@@ -23,11 +23,12 @@ function writeSave(s) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s));
 // ------------------------------------------------------------------ assets
 async function loadAssets(onProgress) {
   const texNames = ['sand', 'limestone', 'gold', 'strata', 'water', 'bedrock'];
-  const texFiles = { ...Object.fromEntries(texNames.map((n) => [n, `assets/tex/${n}.jpg`])), cloud: 'assets/tex/cloud.webp', dust: 'assets/tex/dust.webp', glyph: 'assets/tex/glyph.webp', sparkle: 'assets/ui/sparkle.webp', ankhIcon: 'assets/ui/icon_ankh.webp' };
+  const texFiles = { ...Object.fromEntries(texNames.map((n) => [n, `assets/tex/${n}.jpg`])), cloud: 'assets/tex/cloud.webp', dust: 'assets/tex/dust.webp', glyph: 'assets/tex/glyph.webp', sparkle: 'assets/ui/sparkle.webp' };
   const models = ['worker', 'pharaoh', 'priestess', 'sphinx', 'obelisk', 'palm', 'camel', 'sledge', 'temple', 'anubis', 'boat', 'brazier',
-    'anim_worker_walk', 'anim_worker_cheer', 'anim_worker_idle', 'anim_pharaoh_cheer', 'anim_pharaoh_stomp', 'anim_priestess_cast', 'anim_priestess_dance'];
-  const uiImgs = ['btn_play', 'btn_pause', 'btn_restart', 'btn_next', 'btn_home', 'btn_sound_on', 'btn_sound_off', 'btn_shuffle', 'icon_scarab', 'icon_sun',
-    'icon_ankh', 'icon_eye', 'icon_eye_empty', 'icon_lock', 'icon_pyramid', 'icon_rotate', 'hand', 'panel', 'banner_win', 'banner_lose', 'medallion', 'plaque',
+    'anim_worker_walk', 'anim_worker_cheer', 'anim_worker_idle', 'anim_pharaoh_cheer', 'anim_pharaoh_stomp', 'anim_priestess_cast', 'anim_priestess_dance', ...BUILDINGS];
+  const uiImgs = ['btn_play', 'btn_pause', 'btn_restart', 'btn_next', 'btn_home', 'btn_sound_on', 'btn_sound_off', 'btn_shuffle', 'btn_up', 'btn_close', 'icon_scarab', 'icon_sun',
+    'icon_eye', 'icon_eye_empty', 'icon_lock', 'icon_pyramid', 'hand', 'panel', 'banner_win', 'banner_lose', 'medallion', 'plaque', 'plot', 'bubble',
+    'r_deben', 'r_worker', 'r_grain', 'r_bread', 'r_stone', 'r_block', 'r_tools', 'r_ore', ...BUILDINGS.map((b) => 'b_' + b),
     'd0', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd_plus', 'd_x'];
   const total = Object.keys(texFiles).length + models.length + uiImgs.length;
   let done = 0;
@@ -37,7 +38,7 @@ async function loadAssets(onProgress) {
   const assets = { tex: {}, models: {}, img: {} };
   const jobs = [];
   for (const [k, f] of Object.entries(texFiles)) jobs.push(tl.loadAsync(f).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.tex[k] = t; tick(); }));
-  // Hosts that cannot serve .glb get base64 text copies (window.__B64_MODELS is set by that page).
+  // hosts that cannot serve .glb get base64 text copies (window.__B64_MODELS is set by that page)
   const loadModel = async (m) => {
     if (!window.__B64_MODELS) return gl.loadAsync(`assets/models/${m}.glb`);
     const txt = await (await fetch(`assets/models/${m}.glb.txt`)).text();
@@ -49,10 +50,17 @@ async function loadAssets(onProgress) {
   for (const m of models) jobs.push(loadModel(m).then((g) => { assets.models[m] = g; tick(); }));
   for (const u of uiImgs) jobs.push(new Promise((res) => { const i = new Image(); i.onload = i.onerror = () => { tick(); res(); }; i.src = `assets/ui/${u}.webp`; assets.img[u] = i; }));
   await Promise.all(jobs);
-  assets.img.lime = assets.tex.limestone.image;
-  assets.img.gold = assets.tex.gold.image;
   return assets;
 }
+
+const statusKey = (b) => {
+  if (!b.built) return null;
+  if (b.state === 'missing') return 'r_' + b.missing;
+  if (b.state === 'noTools') return 'r_tools';
+  if (b.state === 'flooded') return 'btn_shuffle';
+  if (b.state === 'hungry') return 'r_bread';
+  return null;
+};
 
 // ------------------------------------------------------------------ game
 class Game {
@@ -62,14 +70,14 @@ class Game {
     this.audio = new Audio();
     this.audio.muted = !!this.save.muted;
     this.state = 'loading';
-    this.tray = [null, null, null];
+    this.speed = 1;
+    this.pointers = new Map();
   }
 
   async boot() {
-    this.ui = new UI(this.app, null);
+    this.ui = new UI(this.app);
     this.ui.setSound(!this.save.muted);
     this.assets = await loadAssets((p) => this.ui.setLoad(p));
-    this.ui.assets = this.assets;
     this.world = new World(document.getElementById('gl'), this.assets);
     this._wire();
     this._layout();
@@ -80,7 +88,6 @@ class Game {
       else if (this.audio.ctx && this.state !== 'loading') this.audio.ctx.resume().catch(() => {});
     });
     document.addEventListener('gesturestart', (e) => e.preventDefault());
-    // iOS only starts WebAudio from touchend/click - unlock on the first one
     const unlock = () => { this.audio.unlock(); if (this.state !== 'title' && this.state !== 'loading') this.audio.playMusic(); };
     document.addEventListener('touchend', unlock, { passive: true });
     document.addEventListener('click', unlock);
@@ -106,13 +113,16 @@ class Game {
     ui.on('resume', () => { click(); this.resume(); });
     ui.on('restart', () => { click(); this.startLevel(this.levelIndex); });
     ui.on('next', () => { click(); if (this.levelIndex + 1 < LEVELS.length) this.startLevel(this.levelIndex + 1); else this.openLevels(); });
-    ui.on('shuffle', () => this.shuffle());
+    ui.on('speed', () => { click(); this.speed = this.speed >= 3 ? 1 : this.speed + 1; ui.setSpeed(this.speed); });
+    ui.on('closeSheet', () => { click(); this._closeSheet(); });
+    ui.on('buildType', (type) => this.build(type));
+    ui.on('upgrade', () => this.upgrade());
 
-    const c = ui.trayCanvas;
-    c.addEventListener('pointerdown', (e) => this._down(e));
-    c.addEventListener('pointermove', (e) => this._move(e));
-    c.addEventListener('pointerup', (e) => this._up(e));
-    c.addEventListener('pointercancel', (e) => this._cancel(e));
+    const c = document.getElementById('gl');
+    c.addEventListener('pointerdown', (e) => this._pdown(e));
+    c.addEventListener('pointermove', (e) => this._pmove(e));
+    c.addEventListener('pointerup', (e) => this._pup(e));
+    c.addEventListener('pointercancel', (e) => this.pointers.delete(e.pointerId));
   }
 
   openLevels() {
@@ -125,367 +135,245 @@ class Game {
     this.ui.hideHand();
   }
 
-  // ------------------------------------------------------------ layout
   _layout() {
     const w = window.innerWidth, h = window.innerHeight;
     this.vw = w; this.vh = h;
-    const probe = getComputedStyle(document.documentElement);
-    const sab = parseFloat(probe.getPropertyValue('--sab')) || 0;
-    const trayH = Math.round(Math.min(220, Math.max(150, h * 0.215)) + sab * 0.6);
-    this.trayH = trayH;
-    this.ui.tray.style.height = trayH + 'px';
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.dpr = dpr;
-    const tc = this.ui.trayCanvas;
-    tc.width = Math.round(w * dpr); tc.height = Math.round(trayH * dpr);
-    const dc = this.ui.dragCanvas;
-    dc.width = Math.round(w * dpr); dc.height = Math.round(h * dpr);
-    const hudRect = this.ui.hud.getBoundingClientRect();
     const hudBottom = this.ui.hud.offsetTop + this.ui.hud.offsetHeight;
-    this.freeTop = (hudRect.height ? hudBottom : 130) + 6;
-    this.freeBottom = h - trayH - 6;
+    this.freeTop = (hudBottom || 140) + 4;
+    this.freeBottom = h - 70;
     this.world.setLayout(w, h, this.freeTop, this.freeBottom);
-    this._drawTray();
   }
 
-  // ------------------------------------------------------------ level flow
   later(ms, fn) { const s = this.session; setTimeout(() => { if (s === this.session) fn(); }, ms); }
 
+  // ------------------------------------------------------------ level flow
   startLevel(i) {
     this.session = (this.session || 0) + 1;
     this.levelIndex = i;
     const L = LEVELS[i];
     this.L = L;
     this.sizes = tierSizes(L.base);
-    this.tiers = this.sizes.map((n, t) => {
-      const tier = new Tier(n, t);
-      tier.setup(L.granite[t] || 0, L.ankhs[t] || 0, Math.random);
-      return tier;
-    });
-    this.score = 0; this.shownScore = 0;
-    this.lives = 3;
-    this.combo = 0;
-    this.timeStats = { left: 0, max: 0 };
-    this.tierIndex = 0;
-    this.drag = null; this.press = null;
     this.world.setupLevel(this.sizes);
+    this.eco = new Economy(L, PLOTS, this.sizes.map((n) => n * n));
+    for (const [t, p] of L.prebuilt) this.eco.build(t, p, { free: true, instant: true });
+    this._handleEvents(this.eco.drain());
     this.world.priestessIdle();
     this.world.setDaylight(0);
+    this.speed = 1;
+    this.selected = null;
+    this.warned = {};
     this.ui.show(null);
     this.ui.setInGame(true);
     this.ui.setLevel(i);
-    this.ui.setLives(3);
-    this.ui.setScore(0);
-    this.ui.setShuffleCost(SHUFFLE_COST);
-    this.ui.setTiers(this.sizes.length, 0);
+    this.ui.setSpeed(1);
+    this.ui.setEvent(null);
+    this.ui.setStorm(false);
     this.ui.hideHand();
-    this.tutorial = (i === 0 && !this.save.tut) ? { phase: 'drag', t: 0 } : null;
+    this.resVisible = ['worker', 'bread', 'grain', 'stone', 'block', ...(L.tools ? ['ore', 'tools'] : [])];
+    this.advisor = (i === 0 && !this.save.tut) ? { built: 0 } : null;
+    this.advice = null;
+    this._refreshMarkers();
+    this._hudT = 0; this._bubT = 0;
+    this._updateHud(true);
     requestAnimationFrame(() => this._layout());
-    this.startTier(0);
+    this.state = 'play';
   }
 
-  startTier(t) {
-    this.tierIndex = t;
-    this.tier = this.tiers[t];
-    this.world.showTier(t, this.tier);
-    this.world.focusTier(t);
-    this.timeMax = Math.round(this.tier.emptyCount() * this.L.secPerCell + 3);
-    this.timeLeft = this.timeMax;
-    this.lastTick = 99;
-    this.ui.setTiers(this.sizes.length, t);
-    this.refillAll();
-    this._checkDeadEnd();
-    this.state = 'intro';
-    this.introT = 0.7;
-    this._drawTray();
+  _refreshMarkers() {
+    const terrains = [...new Set(this.L.allowed.map((t) => DEFS[t].terrain))];
+    this.world.setPlotMarkers(terrains, (id) => this.eco.plotFree(id), this.advice?.plot || null);
   }
 
-  // ------------------------------------------------------------ stones
-  fitsAny(piece) {
-    let c = piece.cells;
-    for (let r = 0; r < 4; r++) { if (this.tier.anyFit(c)) return true; c = rotate(c); }
-    return false;
-  }
-  trayHasFit() { return this.tray.some((p) => p && this.fitsAny(p)); }
-  genPiece(ensureFit) {
-    const e = this.tier.emptyCount();
-    for (let a = 0; a < (ensureFit ? 60 : 1); a++) {
-      const p = randomPiece(this.L.set, this.tier.size, e, this.L.gold);
-      if (!ensureFit || this.fitsAny(p)) return p;
+  // ------------------------------------------------------------ economy events -> visuals
+  _nearest(pos, filter) {
+    let best = null, bd = Infinity;
+    for (const b of this.eco.buildings) {
+      if (!b.built || !filter(b)) continue;
+      const p = this.world.buildingPos(b); if (!p) continue;
+      const d = p.distanceTo(pos);
+      if (d < bd) { bd = d; best = p; }
     }
-    return makePiece('o1');
-  }
-  // a fresh set of three stones - only once all three have been placed
-  refillAll() {
-    const now = performance.now();
-    this.tray = [0, 1, 2].map(() => this.genPiece(false));
-    if (!this.trayHasFit() && Math.random() < this.L.fair) this.tray[Math.floor(Math.random() * 3)] = this.genPiece(true);
-    this.tray.forEach((p, k) => { p.born = now + k * 90; });
-  }
-  _checkDeadEnd() {
-    const dead = !this.trayHasFit();
-    this.ui.shuffleHint(dead);
-    return dead;
+    return best;
   }
 
-  shuffle() {
-    if (this.state !== 'play' || this.drag) return;
-    this.audio.unlock();
-    this.audio.shuffle();
-    this.timeLeft -= SHUFFLE_COST;
-    const r = this.ui.btnShuffle.getBoundingClientRect();
-    this.ui.popup(r.left - 30, r.top + this.trayH * 0 + 10, SHUFFLE_COST, { icon: 'icon_sun', size: 22, prefix: null });
-    const keep = Math.floor(Math.random() * 3);
-    const now = performance.now();
-    for (let k = 0; k < 3; k++) { this.tray[k] = k === keep ? this.genPiece(true) : this.genPiece(false); this.tray[k].born = now + k * 90; }
-    this._checkDeadEnd();
-    this._drawTray();
-  }
-
-  // ------------------------------------------------------------ input
-  _slotAt(x) {
-    const sw = (this.vw - 24) / 3;
-    const k = Math.floor((x - 12) / sw);
-    return k >= 0 && k < 3 ? k : -1;
-  }
-
-  _down(e) {
-    if (this.state !== 'play' && this.state !== 'intro') return;
-    if (this.drag) return;
-    const rect = this.ui.trayCanvas.getBoundingClientRect();
-    const k = this._slotAt(e.clientX - rect.left);
-    if (k < 0 || !this.tray[k]) return;
-    this.audio.unlock();
-    e.preventDefault();
-    try { this.ui.trayCanvas.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
-    this.press = { k, x0: e.clientX, y0: e.clientY, t0: performance.now(), id: e.pointerId };
-  }
-
-  _move(e) {
-    if (!this.press || e.pointerId !== this.press.id) return;
-    e.preventDefault();
-    const dx = e.clientX - this.press.x0, dy = e.clientY - this.press.y0;
-    if (!this.drag && Math.hypot(dx, dy) > 9) {
-      this.drag = { k: this.press.k, piece: this.tray[this.press.k], x: e.clientX, y: e.clientY, s: 0 };
-      this.audio.pick();
-      this._drawTray();
-      if (this.tutorial && this.tutorial.phase === 'drag') this.ui.hideHand();
-    }
-    if (this.drag) { this.drag.x = e.clientX; this.drag.y = e.clientY; this._updateDrag(); }
-  }
-
-  _up(e) {
-    if (!this.press || e.pointerId !== this.press.id) return;
-    const press = this.press; this.press = null;
-    if (this.drag) { this._drop(); return; }
-    // tap -> rotate
-    if (performance.now() - press.t0 < 450) {
-      const p = this.tray[press.k];
-      if (p) {
-        rotatePiece(p);
-        p.spin = performance.now();
-        this.audio.rotate();
-        if (this.tutorial && this.tutorial.phase === 'rotate') this._endTutorial();
-        this._drawTray();
+  _handleEvents(evts) {
+    for (const e of evts) {
+      switch (e.type) {
+        case 'built':
+          this.world.addBuilding(e.b, e.instant);
+          if (!e.instant) this.audio.place(false);
+          break;
+        case 'ready': this.world.buildingReady(e.b); this.audio.button(); break;
+        case 'upgraded': this.world.upgradeBuilding(e.b); this.audio.ankh(); break;
+        case 'take': {
+          const to = this.world.buildingPos(e.b); if (!to) break;
+          const from = this._nearest(to, (b) => DEFS[b.type].out && DEFS[b.type].out[0] === e.good);
+          if (from) this.world.sendCarrier(from, to, 'r_' + e.good);
+          break;
+        }
+        case 'eat': {
+          const to = this.world.buildingPos(e.b); if (!to) break;
+          const from = this._nearest(to, (b) => b.type === 'bakery');
+          if (from) this.world.sendCarrier(from, to, 'r_bread');
+          break;
+        }
+        case 'made': this.world.popIcon(e.b, 'r_' + e.good); break;
+        case 'haul': {
+          const from = this._nearest(new THREE.Vector3(), (b) => b.type === 'mason');
+          if (from) this.world.sendHauler(from, this.world.siteEdge(from));
+          break;
+        }
+        case 'placed': {
+          const p = this.world.placeBlock(e.index);
+          this.audio.block();
+          if (p && this.state === 'play') {
+            const s = this.world.worldToScreen(p);
+            this.ui.popup(s.x, s.y - 20, BLOCK_PAY, { icon: 'r_deben', size: 16 });
+          }
+          break;
+        }
+        case 'tier':
+          this.world.tierComplete(e.tier);
+          this.world.crowdCheer();
+          this.world.pharaohCheer();
+          this.audio.tier();
+          this.ui.flash();
+          this.ui.popIcon(this.vw / 2, (this.freeTop + this.freeBottom) / 2 - 40, 'icon_pyramid', 100);
+          this.ui.popup(this.vw / 2, (this.freeTop + this.freeBottom) / 2 + 40, TIER_PAY, { icon: 'r_deben', size: 30, big: true });
+          break;
+        case 'floodWarn': this.ui.setEvent('flood', false); this.world.floodWarn = true; this.audio.shuffle(); break;
+        case 'floodOn': this.world.setFlood(true); this.ui.setEvent('flood', true); this.world.priestessCast(); this.audio.shuffle(); break;
+        case 'floodOff': this.world.setFlood(false); this.ui.setEvent(null); break;
+        case 'stormOn': this.world.setStorm(true); this.ui.setStorm(true); this.ui.setEvent('storm', true); break;
+        case 'stormOff': this.world.setStorm(false); this.ui.setStorm(false); this.ui.setEvent(null); break;
+        case 'hungry':
+          if (!this._hungrySfx) { this._hungrySfx = true; this.audio.tick(true); setTimeout(() => { this._hungrySfx = false; }, 4000); }
+          break;
+        default: break;
       }
     }
   }
 
-  _cancel() { this.press = null; if (this.drag) { this.drag = null; this.world.setGhost(); this._clearDrag(); this._drawTray(); } }
+  // ------------------------------------------------------------ building + upgrading
+  _plotOf(id) { return PLOTS.find((p) => p.id === id); }
 
-  _dragGeometry() {
-    const ax = this.world.screenAxes();
-    const d = this.drag;
-    d.s = Math.min(1, d.s + 0.34);
-    const scale = this.trayScale + (1 - this.trayScale) * d.s;
-    const cen = pieceCentroid(d.piece, ax, scale);
-    const size = pieceScreenSize(d.piece, ax, H, 1);
-    const lift = this._lift(d.piece, ax);
-    const tx = d.x, ty = d.y - lift;
-    // origin of the piece drawing at plane level (cell 0,0 corner)
-    const ox = tx - cen.x, oy = ty - cen.y;
-    return { ax, scale, ox, oy, cen };
+  _openPlot(plotId) {
+    const b = this.eco.buildings.find((x) => x.plot === plotId);
+    if (b) { this.selected = { building: b.id }; this._sheetKey = null; this._showBuilding(b); this.audio.button(); return; }
+    const plot = this._plotOf(plotId);
+    const types = this.L.allowed.filter((t) => DEFS[t].terrain === plot.terrain);
+    if (!types.length) { this._closeSheet(); return; }
+    this.selected = { plot: plotId };
+    this._sheetKey = null;
+    this._showBuildMenu();
+    this.audio.button();
   }
 
-  // the stone floats above the finger so the finger never hides the landing spot
-  _lift(piece, ax) { return 46 + pieceScreenSize(piece, ax, H, 1).h * 0.5; }
-
-  _updateDrag() {
-    const d = this.drag;
-    const g = this._dragGeometry();
-    // find snapped anchor: project the screen point of cell (0,0)'s centre onto the tier plane
-    const t = this.tierIndex;
-    const n = this.tier.size, off = (n - 1) / 2;
-    const fullCen = pieceCentroid(d.piece, g.ax, 1);
-    const cx = d.x, cy = d.y - this._lift(d.piece, g.ax);
-    // piece origin at full scale
-    const o1x = cx - fullCen.x, o1y = cy - fullCen.y;
-    const sx = o1x + 0.5 * g.ax.ex.x + 0.5 * g.ax.ez.x;
-    const sy = o1y + 0.5 * g.ax.ex.y + 0.5 * g.ax.ez.y;
-    const wp = this.world.screenToPlane(sx, sy, this.world.tierBaseY(t));
-    const prev = d.anchor;
-    d.anchor = null;
-    if (wp) {
-      const fi = wp.x + off, fj = wp.z + off;
-      const ri = Math.round(fi), rj = Math.round(fj);
-      let best = null;
-      if (prev && Math.abs(fi - prev[0]) < 0.72 && Math.abs(fj - prev[1]) < 0.72 && this.tier.canPlace(d.piece.cells, prev[0], prev[1])) {
-        best = prev;   // hysteresis: stay put until the finger clearly moves to another cell
-      } else if (this.tier.canPlace(d.piece.cells, ri, rj)) {
-        best = [ri, rj];
-      } else {
-        // small edge assist: accept a direct neighbour if the finger is close to it
-        let bd = 0.8;
-        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const ai = ri + a, aj = rj + b;
-          const dist = Math.hypot(ai - fi, aj - fj);
-          if (dist < bd && this.tier.canPlace(d.piece.cells, ai, aj)) { bd = dist; best = [ai, aj]; }
-        }
-      }
-      const near = d.piece.cells.some(([x, y]) => { const i = ri + x, j = rj + y; return i >= -1 && j >= -1 && i <= n && j <= n; });
-      if (best) {
-        d.anchor = best;
-        if (!prev || prev[0] !== best[0] || prev[1] !== best[1]) {
-          this.world.setGhost(t, d.piece.cells, best[0], best[1], true, d.piece.gold);
-          this.world.setLinePreview(t, this._linePreview(d.piece.cells, best[0], best[1]));
-          this.audio.snap();
-        }
-      } else if (near) { this.world.setGhost(t, d.piece.cells, ri, rj, false); this.world.setLinePreview(t, null); }
-      else { this.world.setGhost(); this.world.setLinePreview(t, null); }
-    } else { this.world.setGhost(); this.world.setLinePreview(this.tierIndex, null); }
-    this._drawDrag(g);
-  }
-
-  // every cell of the rows/columns that this placement would complete
-  _linePreview(cells, ai, aj) {
-    const T = this.tier, n = T.size;
-    const mine = new Set(cells.map(([x, y]) => (aj + y) * n + ai + x));
-    const filled = (i, j) => T.get(i, j) !== 0 || mine.has(j * n + i);
-    const out = [];
-    for (const j of new Set(cells.map(([, y]) => aj + y))) {
-      if (T.rowsDone.has(j)) continue;
-      let ok = true; for (let i = 0; i < n && ok; i++) ok = filled(i, j);
-      if (ok) for (let i = 0; i < n; i++) out.push([i, j]);
-    }
-    for (const i of new Set(cells.map(([x]) => ai + x))) {
-      if (T.colsDone.has(i)) continue;
-      let ok = true; for (let j = 0; j < n && ok; j++) ok = filled(i, j);
-      if (ok) for (let j = 0; j < n; j++) out.push([i, j]);
-    }
-    return out;
-  }
-
-  _drawDrag(g) {
-    const c = this.ui.dragCanvas, ctx = c.getContext('2d');
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, c.width, c.height);
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.shadowColor = 'rgba(20,0,40,0.5)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 10;
-    // once it snaps, the 3D preview on the pyramid takes over and the floating stone fades back
-    if (this.drag.anchor) return;
-    drawPiece(ctx, this.drag.piece, g.ox, g.oy, g.ax, H, this.assets.img, 0.97, g.scale);
-  }
-  _clearDrag() {
-    const c = this.ui.dragCanvas, ctx = c.getContext('2d');
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
-  }
-
-  _drop() {
-    const d = this.drag;
-    this.drag = null;
-    this.world.setGhost();
-    this._clearDrag();
-    if (d.anchor && (this.state === 'play' || this.state === 'intro')) {
-      this.placePiece(d.k, d.piece, d.anchor[0], d.anchor[1]);
-    } else {
-      this.audio.invalid();
-      this._drawTray();
-    }
-  }
-
-  // ------------------------------------------------------------ placing
-  placePiece(k, piece, ai, aj) {
-    const t = this.tierIndex;
-    const kind = piece.gold ? GOLD : STONE;
-    const res = this.tier.place(piece.cells, ai, aj, kind);
-    res.placed.forEach(([i, j], n) => this.world.addBlock(t, i, j, kind, { delay: n * 0.035 }));
-    this.audio.place(piece.gold);
-    // score popups at the stone's centre
-    const c = res.placed.reduce((a, [i, j]) => a.add(this.world.cellWorld(t, i, j)), new THREE.Vector3()).multiplyScalar(1 / res.placed.length);
-    c.y += H;
-    const sp = this.world.worldToScreen(c);
-    let pts = res.placed.length * (piece.gold ? 30 : 10);
-    const lines = res.rows.length + res.cols.length;
-    if (lines) {
-      this.combo++;
-      const bonus = Math.round(40 * lines * lines * (1 + 0.5 * (this.combo - 1)));
-      pts += bonus;
-      const tb = lines;
-      this.timeLeft = Math.min(this.timeMax, this.timeLeft + tb);
-      const cells = [];
-      for (const j of res.rows) for (let i = 0; i < this.tier.size; i++) cells.push([i, j]);
-      for (const i of res.cols) for (let j = 0; j < this.tier.size; j++) cells.push([i, j]);
-      this.later(260, () => { this.world.flashCells(t, cells, 0.03, 0.45); this.audio.line(lines); });
-      this.later(420, () => this.ui.popup(sp.x, sp.y - 46, tb, { icon: 'icon_sun', size: 24 }));
-      if (this.combo >= 2) this.later(300, () => this.ui.popup(sp.x + 50, sp.y - 90, this.combo, { prefix: 'x', size: 34, big: true }));
-    } else this.combo = 0;
-    for (const [i, j] of res.ankhs) {
-      this.later(200, () => {
-        this.world.removeAnkh(i, j);
-        this.audio.ankh();
-        this.world.priestessCast();
-        const p = this.world.worldToScreen(this.world.cellWorld(t, i, j).setY(this.world.tierBaseY(t) + H * 1.5));
-        this.ui.popup(p.x, p.y - 10, 3, { icon: 'icon_sun', size: 26 });
-        this.ui.popIcon(p.x, p.y - 70, 'icon_ankh', 70);
-      });
-      this.timeLeft = Math.min(this.timeMax, this.timeLeft + 3);
-      pts += 100;
-    }
-    this.score += pts;
-    this.ui.popup(sp.x, sp.y, pts, { size: 26 });
-    this.tray[k] = null;
-    if (this.tutorial && this.tutorial.phase === 'drag') { this.tutorial.phase = 'rotate'; this.tutorial.t = 0; }
-    if (res.complete) { this.tierComplete(); return; }
-    if (this.tray.every((p) => !p)) this.refillAll();
-    this._checkDeadEnd();
-    this._drawTray();
-  }
-
-  tierComplete() {
-    this.state = 'transition';
-    this.timeStats.left += Math.max(0, this.timeLeft);
-    this.timeStats.max += this.timeMax;
-    this.ui.hideHand();
-    this.ui.shuffleHint(false);
-    const t = this.tierIndex;
-    const bonus = Math.round(this.timeLeft) * 5;
-    this.score += bonus;
-    this.world.tierComplete(t);
-    this.world.workersCheer(2.4);
-    this.world.pharaohCheer();
-    this.audio.tier();
-    this.ui.flash();
-    this.later(250, () => {
-      this.ui.popIcon(this.vw / 2, (this.freeTop + this.freeBottom) / 2 - 40, 'icon_pyramid', 110);
-      this.ui.popup(this.vw / 2, (this.freeTop + this.freeBottom) / 2 + 40, bonus, { size: 34, big: true });
+  _showBuildMenu() {
+    const plot = this._plotOf(this.selected.plot);
+    const types = this.L.allowed.filter((t) => DEFS[t].terrain === plot.terrain);
+    const cards = types.map((type) => {
+      const d = DEFS[type];
+      const money = this.eco.deben >= d.cost, hands = this.eco.workersFree() >= d.staff;
+      return { type, cost: d.cost, staff: d.staff, inputs: (d.in || []).map(([g]) => g), output: d.out ? d.out[0] : null, money, hands, ok: money && hands };
     });
-    this.tray = [null, null, null];
-    this._drawTray();
-    this.ui.setTiers(this.sizes.length, t + 1);
-    this.later(1700, () => {
-      if (t + 1 < this.tiers.length) this.startTier(t + 1);
-      else this.levelComplete();
-    });
+    const key = JSON.stringify(cards);
+    if (key !== this._sheetKey) { this._sheetKey = key; this.ui.openBuildSheet(cards); }
   }
 
+  _buildingInfo(b) {
+    const d = DEFS[b.type];
+    const extra = staffFor(b.type, b.level + 1) - staffFor(b.type, b.level);
+    const upCost = b.level < MAX_LEVEL ? upgradeCost(b.type, b.level) : 0;
+    return {
+      type: b.type, level: b.level, maxLevel: MAX_LEVEL,
+      inputs: (d.in || []).map(([g]) => g), output: d.out ? d.out[0] : null, outN: d.out ? d.out[1] : 0,
+      cycle: d.cycle ? Math.round(cycleOf(b.type, b.level)) : 0,
+      workers: b.type === 'house' ? DEFS.house.workers[b.level - 1] : 0,
+      eat: b.type === 'house' ? Math.round(d.eat / (1 + 0.4 * (b.level - 1))) : 0,
+      status: statusKey(b),
+      upCost, upStaff: Math.max(0, extra),
+      money: this.eco.deben >= upCost, hands: this.eco.workersFree() >= extra,
+      canUpgrade: this.eco.canUpgrade(b),
+    };
+  }
+
+  _showBuilding(b) {
+    const info = this._buildingInfo(b);
+    const key = JSON.stringify(info);
+    if (key !== this._sheetKey) { this._sheetKey = key; this.ui.openBuildingSheet(info); }
+  }
+
+  _closeSheet() { this.selected = null; this._sheetKey = null; this.ui.closeSheet(); }
+
+  build(type) {
+    if (!this.selected || !this.selected.plot || this.state !== 'play') return;
+    const b = this.eco.build(type, this.selected.plot);
+    if (!b) { this.audio.invalid(); this.ui.shakeCard(type); return; }
+    this._handleEvents(this.eco.drain());
+    this._closeSheet();
+    if (this.advisor) this.advisor.built++;
+    this.advice = null;
+    this._refreshMarkers();
+    this._updateHud(true);
+  }
+
+  upgrade() {
+    if (!this.selected || !this.selected.building || this.state !== 'play') return;
+    const b = this.eco.buildings.find((x) => x.id === this.selected.building);
+    if (!b || !this.eco.upgrade(b)) { this.audio.invalid(); this.ui.shakeCard(); return; }
+    this._handleEvents(this.eco.drain());
+    this._sheetKey = null;
+    this._showBuilding(b);
+    this._updateHud(true);
+  }
+
+  // ------------------------------------------------------------ camera input: drag to pan, pinch to zoom, tap to select
+  _pdown(e) {
+    if (this.state !== 'play') return;
+    this.audio.unlock();
+    try { e.target.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false });
+    if (this.pointers.size === 2) { const [a, b] = [...this.pointers.values()]; this.pinch = Math.hypot(a.x - b.x, a.y - b.y); a.moved = b.moved = true; }
+  }
+
+  _pmove(e) {
+    const p = this.pointers.get(e.pointerId);
+    if (!p) return;
+    if (this.pointers.size >= 2) {
+      p.x = e.clientX; p.y = e.clientY;
+      const [a, b] = [...this.pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (this.pinch && d > 10) this.world.zoom(this.pinch / d);
+      this.pinch = d;
+      return;
+    }
+    if (!p.moved && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 8) p.moved = true;
+    if (p.moved) {
+      const a = this.world.screenToPlane(p.x, p.y, 0), b = this.world.screenToPlane(e.clientX, e.clientY, 0);
+      if (a && b) this.world.pan(a.x - b.x, a.z - b.z);
+    }
+    p.x = e.clientX; p.y = e.clientY;
+  }
+
+  _pup(e) {
+    const p = this.pointers.get(e.pointerId);
+    this.pointers.delete(e.pointerId);
+    if (this.pointers.size < 2) this.pinch = null;
+    if (!p || p.moved || this.state !== 'play') return;
+    if (performance.now() - p.t0 > 600) return;
+    const id = this.world.pickPlot(e.clientX, e.clientY);
+    if (id) this._openPlot(id);
+    else if (this.selected) this._closeSheet();
+  }
+
+  // ------------------------------------------------------------ win / lose
   async levelComplete() {
     this.state = 'finale';
-    this.ui.tray.classList.add('hidden');
-    this.ui.setTime(1, false);
-    this.world.gridMesh.visible = false;
-    this.world.focusTier(this.sizes.length - 1);
-    this.audio.capstone();
+    this._closeSheet();
     this.ui.hideHand();
+    this.ui.controls.classList.add('hidden');
+    this.audio.capstone();
     const session = this.session;
     await this.world.placeCapstone(this.sizes.length);
     if (session !== this.session) return;
@@ -493,110 +381,76 @@ class Game {
     this.audio.fanfare();
     this.world.setOrbit(true);
     this.world.priestessDance();
-    this.world.workersCheer(8);
+    this.world.crowdCheer(8);
     this.world.pharaohCheer();
-    // Horus eyes: 3 = no scarab lost and a quarter of the sun time left over, 2 = at most one scarab lost
-    const spare = this.timeStats.left / Math.max(1, this.timeStats.max);
-    const eyes = this.lives === 3 && spare >= 0.25 ? 3 : (this.lives === 3 || (this.lives === 2 && spare >= 0.1)) ? 2 : 1;
+    const ratio = this.eco.time / this.L.deadline;
+    const eyes = ratio <= 0.75 ? 3 : ratio <= 0.9 ? 2 : 1;
+    const score = Math.round(this.eco.total * 10 + Math.max(0, this.L.deadline - this.eco.time) * 3 + this.eco.deben);
     const i = this.levelIndex;
     this.save.eyes[i] = Math.max(this.save.eyes[i] || 0, eyes);
-    this.save.best[i] = Math.max(this.save.best[i] || 0, this.score);
+    this.save.best[i] = Math.max(this.save.best[i] || 0, score);
     this.save.unlocked = Math.max(this.save.unlocked, Math.min(LEVELS.length - 1, i + 1));
     writeSave(this.save);
     this.later(1600, () => {
       this.state = 'won';
       this.ui.hud.classList.add('hidden');
-      this.ui.showWin(eyes, this.score);
+      this.ui.showWin(eyes, score);
       this.ui.btnNextW.style.display = i + 1 < LEVELS.length ? '' : 'none';
     });
   }
 
-  loseLife() {
-    this.lives--;
-    this.ui.setLives(this.lives);
+  lose() {
+    this.state = 'lost';
+    this._closeSheet();
+    this.ui.hideHand();
     this.audio.loseLife();
     this.world.pharaohStomp();
-    this.world.shake = 0.45;
+    this.world.shake = 0.5;
     this.ui.shakeHud();
-    this.ui.popIcon(this.vw / 2, (this.freeTop + this.freeBottom) / 2, 'icon_scarab', 100);
-    if (this.lives <= 0) {
-      this.state = 'lost';
-      this.ui.setTime(0, false);
-      this.ui.tray.classList.add('hidden');
-      this.world.setGhost();
-      this.later(1300, () => { this.ui.hud.classList.add('hidden'); this.ui.show('scrLose'); });
-      return;
+    this.later(1400, () => { this.ui.setInGame(false); this.ui.show('scrLose'); });
+  }
+
+  pause() { this.state = 'pause'; this.ui.show('scrPause'); }
+  resume() { this.ui.show(null); this.state = 'play'; this.last = performance.now(); }
+
+  // ------------------------------------------------------------ HUD + hints
+  _updateHud() {
+    const E = this.eco;
+    this.ui.setDeben(E.deben);
+    this.ui.setProgress(E.placed, E.total);
+    const r = { ...E.stock, worker: E.workersFree() };
+    this.ui.setResources(r, this.resVisible);
+    this.ui.flagRes('bread', E.hungryShare() > 0);
+    this.ui.flagRes('worker', E.workersFree() <= 0);
+    const left = Math.max(0, this.L.deadline - E.time);
+    const frac = left / this.L.deadline;
+    this.ui.setTime(frac, frac < 0.2);
+    this.world.setDaylight(1 - frac);
+    document.getElementById('skyTint').style.opacity = ((1 - frac) * 0.7).toFixed(3);
+    for (const th of [0.25, 0.1]) if (frac < th && !this.warned[th]) { this.warned[th] = true; this.world.pharaohStomp(); this.audio.tick(true); }
+    if (this.selected?.plot) this._showBuildMenu();
+    else if (this.selected?.building) { const b = E.buildings.find((x) => x.id === this.selected.building); if (b) this._showBuilding(b); }
+  }
+
+  _advisorStep() {
+    const A = this.advisor;
+    const E = this.eco;
+    const has = (t) => E.buildings.some((b) => b.type === t);
+    const freePlot = (terrain) => PLOTS.find((p) => p.terrain === terrain && E.plotFree(p.id));
+    let adv = null;
+    if (!has('farm')) adv = { type: 'farm', plot: freePlot('fertile')?.id };
+    else if (E.buildings.filter((b) => b.type === 'house').length < 2) adv = { type: 'house', plot: freePlot('desert')?.id };
+    else if (!has('bakery')) adv = { type: 'bakery', plot: freePlot('desert')?.id };
+    if (!adv || !adv.plot || A.built >= 3) {
+      this.advisor = null; this.advice = null; this.save.tut = true; writeSave(this.save);
+      this.ui.hideHand(); this._refreshMarkers(); return;
     }
-    this.timeLeft = this.timeMax * 0.5;
-  }
-
-  pause() {
-    this.state = 'pause';
-    this._cancel();
-    this.ui.show('scrPause');
-  }
-  resume() {
-    this.ui.show(null);
-    this.state = 'play';
-    this.last = performance.now();
-  }
-
-  _endTutorial() {
-    this.tutorial = null;
-    this.save.tut = true; writeSave(this.save);
-    this.ui.hideHand();
-  }
-
-  // ------------------------------------------------------------ tray drawing
-  _drawTray() {
-    if (!this.world || !this.ui) return;
-    const c = this.ui.trayCanvas, ctx = c.getContext('2d');
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, c.width, c.height);
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    const ax = this.world.screenAxes();
-    const w = this.vw, h = this.trayH;
-    const sw = (w - 24) / 3;
-    // one scale for all three stones (so sizes compare honestly), as large as the slots allow
-    const innerH = h - 30;
-    let rw = pieceScreenSize({ cells: [[0, 0], [1, 1]] }, ax, H, 1).w, rh = pieceScreenSize({ cells: [[0, 0], [1, 1]] }, ax, H, 1).h;
-    for (const p of this.tray) if (p) { const z = pieceScreenSize(p, ax, H, 1); rw = Math.max(rw, z.w); rh = Math.max(rh, z.h); }
-    const target = Math.min(1.9, (sw * 0.86) / rw, (innerH * 0.86) / rh);
-    // ease towards the new scale so the tray does not jump when stones change
-    this.trayScale = this.trayScale ? this.trayScale + (target - this.trayScale) * 0.35 : target;
-    if (Math.abs(this.trayScale - target) > 0.01) this._scaleEasing = true; else { this.trayScale = target; this._scaleEasing = false; }
-    const now = performance.now();
-    for (let k = 0; k < 3; k++) {
-      const p = this.tray[k];
-      const cx = 12 + sw * (k + 0.5), cy = 14 + innerH * 0.52;
-      // slot plate
-      ctx.save();
-      ctx.beginPath(); ctx.ellipse(cx, cy + innerH * 0.26, sw * 0.42, innerH * 0.16, 0, 0, Math.PI * 2);
-      const gr = ctx.createRadialGradient(cx, cy + innerH * 0.26, 4, cx, cy + innerH * 0.26, sw * 0.44);
-      gr.addColorStop(0, 'rgba(200,140,255,0.45)'); gr.addColorStop(1, 'rgba(190,120,255,0)');
-      ctx.fillStyle = gr; ctx.fill();
-      ctx.restore();
-      if (!p || (this.drag && this.drag.k === k)) continue;
-      const fits = this.tier ? this.fitsAny(p) : true;
-      const fitsNow = this.tier ? !!this.tier.anyFit(p.cells) : true;
-      let s = this.trayScale;
-      if (p.born && now - p.born < 300) s *= Math.max(0.02, Math.min(1, (now - p.born) / 300)) ** 0.6;
-      const cen = pieceCentroid(p, ax, s);
-      const size = pieceScreenSize(p, ax, H, s);
-      const ox = cx - (size.minX + size.w / 2), oy = cy - (size.minY + size.h / 2);
-      ctx.save();
-      if (!fits) ctx.filter = 'grayscale(0.85) brightness(0.65)';
-      drawPiece(ctx, p, ox, oy, ax, H, this.assets.img, fits ? 1 : 0.5, s, { glow: fits });
-      ctx.restore();
-      if (fits && !fitsNow) {
-        // hint: only fits after turning
-        const img = this.assets.img.icon_rotate;
-        ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200);
-        ctx.drawImage(img, cx + sw * 0.28, cy - innerH * 0.42, 26, 27);
-        ctx.globalAlpha = 1;
-      }
-    }
-    this._trayAnimating = this._scaleEasing || this.tray.some((p) => p && p.born && now - p.born < 320) || this.tray.some((p) => p && this.tier && this.fitsAny(p) && !this.tier.anyFit(p.cells));
+    if (!this.advice || this.advice.plot !== adv.plot) { this.advice = adv; this._refreshMarkers(); }
+    if (this.selected) { this.ui.hideHand(); return; }
+    const pv = this.world.plotViews[adv.plot];
+    const s = this.world.worldToScreen(pv.pos.clone().setY(0.4));
+    const bob = Math.abs(Math.sin(performance.now() / 260)) * 12;
+    this.ui.handAt(s.x, s.y + 8 + bob, 'b_' + adv.type);
   }
 
   // ------------------------------------------------------------ main loop
@@ -606,63 +460,26 @@ class Game {
     this.last = t;
     if (!this.world) return;
     const menu = this.state === 'title' || this.state === 'menu' || this.state === 'loading';
-    if (this.state === 'intro') { this.introT -= dt; if (this.introT <= 0) this.state = 'play'; }
+    let gdt = 0;
     if (this.state === 'play') {
-      this.timeLeft -= dt;
-      const sec = Math.ceil(this.timeLeft);
-      if (this.timeLeft < 10 && sec !== this.lastTick && sec >= 0) { this.lastTick = sec; this.audio.tick(this.timeLeft < 5); }
-      if (this.timeLeft <= 0) { this.timeLeft = 0; this.loseLife(); }
-      if (this.tutorial) this._tutorialStep(dt);
-    } else if (this.tutorial) this.ui.hideHand();
-    if (this.tier && !menu) {
-      const p = 1 - Math.max(0, this.timeLeft) / this.timeMax;
-      if (this.state === 'play' || this.state === 'intro') {
-        this.world.setDaylight(p);
-        this.ui.setTime(this.timeLeft / this.timeMax, this.timeLeft < 10 && this.state === 'play');
-        document.getElementById('skyTint').style.opacity = (p * 0.75).toFixed(3);
-      }
-      // rolling score
-      if (this.shownScore !== this.score) {
-        this.shownScore += Math.max(1, Math.ceil((this.score - this.shownScore) * Math.min(1, dt * 8)));
-        if (this.shownScore > this.score) this.shownScore = this.score;
-        this.ui.setScore(this.shownScore);
-      }
-      if (this._trayAnimating) this._drawTray();
-      if (this.drag) this._updateDrag();
+      gdt = dt * this.speed;
+      let rest = gdt;
+      while (rest > 1e-6) { const s = Math.min(0.1, rest); this.eco.step(s); rest -= s; }
+      this._handleEvents(this.eco.drain());
+      this._hudT -= dt; this._bubT -= dt;
+      if (this._hudT <= 0) { this._hudT = 0.12; this._updateHud(); }
+      if (this._bubT <= 0) { this._bubT = 0.25; for (const b of this.eco.buildings) this.world.setBubble(b, statusKey(b)); }
+      if (this.advisor) this._advisorStep();
+      if (this.eco.done()) this.levelComplete();
+      else if (this.eco.time >= this.L.deadline) this.lose();
     }
     if (!menu) {
-      this.world.update(dt);
-      // adaptive quality: drop resolution/shadow size once if the device struggles
+      this.world.update(dt, this.state === 'play' ? gdt : (this.state === 'pause' ? 0 : dt));
       if (this.state === 'play' && this.world.quality !== 0) {
         this.perf = this.perf || { n: 0, sum: 0 };
         this.perf.n++; if (this.perf.n > 40) this.perf.sum += dt;
         if (this.perf.n === 160 && this.perf.sum / 120 > 1 / 38) this.world.setQuality(0);
       }
-    }
-  }
-
-  _tutorialStep(dt) {
-    const tu = this.tutorial;
-    tu.t += dt;
-    if (tu.phase === 'drag') {
-      if (this.drag) return;
-      const sw = (this.vw - 24) / 3;
-      const k = this.tray.findIndex((p) => p && this.fitsAny(p) && this.tier.anyFit(p.cells));
-      if (k < 0) return;
-      const sx = 12 + sw * (k + 0.5), sy = this.vh - this.trayH + 14 + (this.trayH - 30) * 0.52;
-      const target = this.world.worldToScreen(new THREE.Vector3(0, this.world.tierBaseY(this.tierIndex) + H, 0));
-      const cyc = (tu.t % 2.2) / 2.2;
-      const m = Math.min(1, Math.max(0, (cyc - 0.15) / 0.6));
-      const e = m < 0.5 ? 2 * m * m : 1 - Math.pow(-2 * m + 2, 2) / 2;
-      this.ui.handAt(sx + (target.x - sx) * e, sy + (target.y + 60 - sy) * e);
-    } else if (tu.phase === 'rotate') {
-      if (tu.t > 6) { this._endTutorial(); return; }
-      const sw = (this.vw - 24) / 3;
-      const k = this.tray.findIndex((p) => p && p.cells.length > 1);
-      if (k < 0) return;
-      const sx = 12 + sw * (k + 0.5), sy = this.vh - this.trayH + 14 + (this.trayH - 30) * 0.5;
-      const bob = Math.abs(Math.sin(tu.t * 4)) * 14;
-      this.ui.handAt(sx + 8, sy + 10 + bob, true);
     }
   }
 }

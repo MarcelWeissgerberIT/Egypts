@@ -19,7 +19,8 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 });
 
 const SIZES = { worker: 1024, pharaoh: 1024, priestess: 1024, sphinx: 1024, temple: 1024, camel: 768, boat: 768,
-  obelisk: 512, palm: 768, sledge: 512, anubis: 768, brazier: 512 };
+  obelisk: 512, palm: 768, sledge: 512, anubis: 768, brazier: 512,
+  house: 768, farm: 768, bakery: 768, quarry: 768, mason: 768, mine: 768, smithy: 768 };
 
 async function full(name) {
   const doc = await io.read(path.join(SRC, name + '.glb'));
@@ -50,7 +51,8 @@ async function clip(src, outName, clipName) {
 
 const which = process.argv[2] || 'full';
 if (which === 'full') {
-  for (const n of Object.keys(SIZES)) if (fs.existsSync(path.join(SRC, n + '.glb'))) await full(n);
+  const only = process.argv.slice(3);
+  for (const n of (only.length ? only : Object.keys(SIZES))) if (fs.existsSync(path.join(SRC, n + '.glb'))) await full(n);
 } else {
   const clips = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/clips.json'), 'utf8'));
   for (const [src, out, nm] of clips) if (fs.existsSync(path.join(SRC, src + '.glb'))) await clip(src, out, nm);

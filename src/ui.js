@@ -1,6 +1,4 @@
-// Text-free user interface: every label is an image generated with Higgsfield.
-import { extent } from './pieces.js';
-
+// Text-free user interface: every label, number and button is an image generated with Higgsfield.
 const U = (n) => `assets/ui/${n}.webp`;
 const DIGIT_AR = { 0: 134, 1: 126, 2: 126, 3: 129, 4: 136, 5: 128, 6: 126, 7: 133, 8: 127, 9: 125, plus: 160, x: 157 };
 
@@ -18,17 +16,17 @@ function el(tag, attrs = {}, html = '') {
   e.innerHTML = html;
   return e;
 }
+function button(id, img, cls = '') { return el('div', { id, class: 'btn ' + cls, role: 'button' }, `<img src="${U(img)}">`); }
+const ico = (k, h, cls = '') => `<img class="${cls}" src="${U(k)}" style="height:${h}px">`;
+const arrow = '<div class="arrow"></div>';
 
-function button(id, img, cls = '') {
-  const b = el('div', { id, class: 'btn ' + cls, role: 'button' }, `<img src="${U(img)}">`);
-  return b;
-}
+export const RES_KEYS = ['worker', 'bread', 'grain', 'stone', 'block', 'ore', 'tools'];
 
 export class UI {
-  constructor(app, assets) {
+  constructor(app) {
     this.app = app;
-    this.assets = assets;
     this.handlers = {};
+    this._vals = {};
     this._build();
   }
 
@@ -43,43 +41,54 @@ export class UI {
 
   _build() {
     const app = this.app;
-    // HUD
+    // ---------------- HUD
     const hud = el('div', { id: 'hud', class: 'hidden' });
     const row = el('div', { class: 'row' });
     const left = el('div', { class: 'row' });
     this.btnPause = button('btnPause', 'btn_pause');
     this.lvlBadge = el('div', { id: 'lvlBadge' }, `<img src="${U('medallion')}"><div class="digits"></div>`);
     left.append(this.btnPause, this.lvlBadge);
-    this.scoreBox = el('div', { id: 'scoreBox' }, `<img src="${U('plaque')}"><div class="digits"></div>`);
-    this.lives = el('div', { id: 'lives' }, [0, 1, 2].map(() => `<img src="${U('icon_scarab')}">`).join(''));
-    row.append(left, this.scoreBox, this.lives);
+    this.debenChip = el('div', { class: 'bigchip', id: 'debenChip' }, `${ico('r_deben', 34)}<div class="digits"></div>`);
+    this.progChip = el('div', { class: 'bigchip', id: 'progChip' }, `${ico('icon_pyramid', 32)}<div class="pbar"><div class="pfill"></div></div>`);
+    row.append(left, this.debenChip, this.progChip);
     this.timebar = el('div', { id: 'timebar' }, `<div id="timefill"></div><img id="timesun" src="${U('icon_sun')}">`);
-    this.tiersEl = el('div', { id: 'tiers' });
-    hud.append(row, this.timebar, this.tiersEl);
+    this.resRow = el('div', { id: 'resRow' });
+    this.chips = {};
+    for (const k of RES_KEYS) {
+      const c = el('div', { class: 'chip', 'data-k': k }, `${ico('r_' + k, 26)}<div class="digits"></div>`);
+      this.chips[k] = c; this.resRow.append(c);
+    }
+    hud.append(row, this.timebar, this.resRow);
     app.append(hud);
     this.hud = hud;
     this.timefill = this.timebar.querySelector('#timefill');
     this.timesun = this.timebar.querySelector('#timesun');
     this._bindTap(this.btnPause, 'pause');
 
-    // tray
-    const tray = el('div', { id: 'tray', class: 'hidden' }, `<div id="trayBg"></div><canvas id="trayCanvas"></canvas>`);
-    this.btnShuffle = button('btnShuffle', 'btn_shuffle');
-    this.shuffleCost = el('div', { id: 'shuffleCost' });
-    tray.append(this.btnShuffle, this.shuffleCost);
-    app.append(tray);
-    this.tray = tray;
-    this.trayCanvas = tray.querySelector('#trayCanvas');
-    this._bindTap(this.btnShuffle, 'shuffle');
+    // ---------------- bottom controls
+    this.controls = el('div', { id: 'controls', class: 'hidden' });
+    this.btnSpeed = el('div', { id: 'btnSpeed', class: 'btn', role: 'button' }, `<img src="${U('btn_next')}"><div class="spd digits"></div>`);
+    this.eventIcon = el('div', { id: 'eventIcon' });
+    this.controls.append(this.eventIcon, this.btnSpeed);
+    app.append(this.controls);
+    this._bindTap(this.btnSpeed, 'speed');
 
-    this.dragCanvas = el('canvas', { id: 'drag' });
+    // ---------------- sheet (build menu / building info)
+    this.sheet = el('div', { id: 'sheet', class: 'hidden' }, `<div class="sheetBody"></div>`);
+    this.sheetClose = button('sheetClose', 'btn_close');
+    this.sheet.append(this.sheetClose);
+    this.sheetBody = this.sheet.querySelector('.sheetBody');
+    app.append(this.sheet);
+    this._bindTap(this.sheetClose, 'closeSheet');
+
     this.fx = el('div', { id: 'fx' });
     this.flashEl = el('div', { id: 'flash' });
     this.vignette = el('div', { id: 'vignette' });
-    this.hand = el('div', { id: 'hand' }, `<img src="${U('hand')}"><img class="rot" src="${U('icon_rotate')}">`);
-    app.append(this.dragCanvas, this.fx, this.flashEl, this.vignette, this.hand);
+    this.stormEl = el('div', { id: 'storm' });
+    this.hand = el('div', { id: 'hand' }, `<img src="${U('hand')}"><img class="advice" src="">`);
+    app.append(this.stormEl, this.fx, this.flashEl, this.vignette, this.hand);
 
-    // screens
+    // ---------------- screens
     this.screens = {};
     const loading = el('div', { id: 'scrLoading', class: 'screen on' }, `<div class="bgArt"></div><img id="logo" src="${U('logo')}"><img id="loadScarab" src="${U('icon_scarab')}"><div id="loadBar"><div id="loadFill"></div></div>`);
     const title = el('div', { id: 'scrTitle', class: 'screen' }, `<div class="bgArt"></div><img id="logo" src="${U('logo')}">`);
@@ -137,19 +146,13 @@ export class UI {
     this._bindTap(this.btnNextW, 'next');
   }
 
-  show(id) {
-    for (const [k, s] of Object.entries(this.screens)) s.classList.toggle('on', k === id);
-  }
-
+  show(id) { for (const [k, s] of Object.entries(this.screens)) s.classList.toggle('on', k === id); }
   setLoad(p) { const f = document.getElementById('loadFill'); if (f) f.style.width = Math.round(p * 100) + '%'; }
-
-  setSound(on) {
-    for (const b of [this.btnSoundT, this.btnSoundP]) b.querySelector('img').src = U(on ? 'btn_sound_on' : 'btn_sound_off');
-  }
-
+  setSound(on) { for (const b of [this.btnSoundT, this.btnSoundP]) b.querySelector('img').src = U(on ? 'btn_sound_on' : 'btn_sound_off'); }
   setInGame(on) {
     this.hud.classList.toggle('hidden', !on);
-    this.tray.classList.toggle('hidden', !on);
+    this.controls.classList.toggle('hidden', !on);
+    if (!on) this.closeSheet();
   }
 
   // ---------------- level select
@@ -170,20 +173,23 @@ export class UI {
     });
   }
 
-  // ---------------- HUD
-  setScore(n) {
-    if (n === this._score) return;
-    this._score = n;
-    this.scoreBox.querySelector('.digits').innerHTML = digitsHTML(n, 26);
-  }
+  // ---------------- HUD values
+  _set(key, html) { if (this._vals[key] === html) return false; this._vals[key] = html; return true; }
   setLevel(i) { this.lvlBadge.querySelector('.digits').innerHTML = digitsHTML(i + 1, 22); }
-  setLives(n) {
-    [...this.lives.children].forEach((img, i) => {
-      const lost = i >= n;
-      if (lost && !img.classList.contains('lost')) { img.classList.add('lost'); }
-      if (!lost) img.classList.remove('lost');
-    });
+  setDeben(n) { const h = digitsHTML(n, 24); if (this._set('deben', h)) this.debenChip.querySelector('.digits').innerHTML = h; }
+  setProgress(placed, total) {
+    this.progChip.querySelector('.pfill').style.width = `${Math.min(100, (placed / total) * 100)}%`;
   }
+  setResources(r, visible) {
+    for (const k of RES_KEYS) {
+      const c = this.chips[k];
+      c.style.display = visible.includes(k) ? '' : 'none';
+      const h = digitsHTML(r[k] ?? 0, 18);
+      if (this._set('r_' + k, h)) c.querySelector('.digits').innerHTML = h;
+    }
+  }
+  flagRes(k, bad) { this.chips[k].classList.toggle('bad', bad); }
+  pulseRes(k) { const c = this.chips[k]; c.classList.remove('gain'); void c.offsetWidth; c.classList.add('gain'); }
   setTime(frac, low) {
     const f = Math.max(0, Math.min(1, frac));
     this.timefill.style.width = `calc(${f * 100}% - 4px)`;
@@ -191,16 +197,62 @@ export class UI {
     this.timebar.classList.toggle('low', low);
     this.vignette.classList.toggle('on', low);
   }
-  setTiers(n, cur) {
-    let h = `<img src="${U('icon_pyramid')}">`;
-    for (let i = 0; i < n; i++) h += `<div class="pip ${i < cur ? 'done' : i === cur ? 'cur' : ''}"></div>`;
-    this.tiersEl.innerHTML = h;
+  setSpeed(s) { this.btnSpeed.querySelector('.spd').innerHTML = digitsHTML(s, 20, 'x'); this.btnSpeed.classList.toggle('fast', s > 1); }
+  setEvent(kind, active) {
+    const src = kind === 'flood' ? U('btn_shuffle') : kind === 'storm' ? 'assets/tex/dust.webp' : null;
+    this.eventIcon.innerHTML = src ? `<img src="${src}">` : '';
+    this.eventIcon.className = kind ? (active ? 'on' : 'warn') : '';
   }
-  setShuffleCost(sec) {
-    // "- N sun": a small golden bar acts as the minus sign
-    this.shuffleCost.innerHTML = `<div style="width:10px;height:4px;border-radius:2px;background:linear-gradient(#fff2b0,#e6a11c);margin:0 2px;box-shadow:0 0 3px #000"></div>${digitsHTML(sec, 18)}<img src="${U('icon_sun')}" style="height:22px;width:22px">`;
+  setStorm(on) { this.stormEl.classList.toggle('on', on); }
+
+  // ---------------- sheets
+  openBuildSheet(cards) {
+    let h = '<div class="cards">';
+    for (const c of cards) {
+      h += `<div class="card btn${c.ok ? '' : ' off'}" data-type="${c.type}">
+        <img class="bimg" src="${U('b_' + c.type)}">
+        <div class="recipe">${c.inputs.map((g) => ico('r_' + g, 20)).join('')}${c.inputs.length ? arrow : ''}${c.output ? ico('r_' + c.output, 22) : ico('r_worker', 22)}</div>
+        <div class="cost${c.money ? '' : ' short'}">${ico('r_deben', 20)}<div class="digits">${digitsHTML(c.cost, 16)}</div></div>
+        ${c.staff ? `<div class="cost${c.hands ? '' : ' short'}">${ico('r_worker', 20)}<div class="digits">${digitsHTML(c.staff, 16)}</div></div>` : ''}
+      </div>`;
+    }
+    h += '</div>';
+    this.sheetBody.innerHTML = h;
+    this.sheetBody.querySelectorAll('.card').forEach((cardEl) => {
+      const type = cardEl.getAttribute('data-type');
+      this._bindTap(cardEl, 'buildType', type);
+    });
+    this.sheet.classList.remove('hidden');
+    this.controls.classList.add('under');
+    this.sheetOpen = 'build';
   }
-  shuffleHint(on) { this.btnShuffle.classList.toggle('hint', on); }
+
+  openBuildingSheet(info) {
+    const pips = [0, 1, 2].map((i) => `<div class="pip ${i < info.level ? 'done' : ''}"></div>`).join('');
+    let recipe = '';
+    if (info.type === 'house') recipe = `${ico('r_worker', 30)}<div class="digits">${digitsHTML(info.workers, 22)}</div><div class="sep"></div>${ico('r_bread', 28)}${ico('icon_sun', 24)}<div class="digits">${digitsHTML(info.eat, 18)}</div>`;
+    else recipe = `${info.inputs.map((g) => ico('r_' + g, 30)).join('')}${info.inputs.length ? arrow : ''}${ico('r_' + info.output, 34)}${info.outN > 1 ? `<div class="digits">${digitsHTML(info.outN, 18, 'x')}</div>` : ''}<div class="sep"></div>${ico('icon_sun', 24)}<div class="digits">${digitsHTML(info.cycle, 18)}</div>`;
+    const status = info.status ? `<div class="status">${ico('bubble', 54, 'bub')}${ico(info.status, 30, 'sicon')}</div>` : '';
+    let up = '';
+    if (info.level < info.maxLevel) {
+      up = `<div class="upgrade btn${info.canUpgrade ? '' : ' off'}" id="btnUpgrade">${ico('btn_up', 64)}
+        <div class="cost${info.money ? '' : ' short'}">${ico('r_deben', 20)}<div class="digits">${digitsHTML(info.upCost, 16)}</div></div>
+        ${info.upStaff ? `<div class="cost${info.hands ? '' : ' short'}">${ico('r_worker', 20)}<div class="digits">${digitsHTML(info.upStaff, 16, 'plus')}</div></div>` : ''}</div>`;
+    } else up = `<div class="maxed">${ico('icon_eye', 46)}</div>`;
+    this.sheetBody.innerHTML = `<div class="binfo"><div class="bleft"><img class="bimg big" src="${U('b_' + info.type)}">${status}</div>
+      <div class="bright"><div class="pips">${pips}</div><div class="recipe big">${recipe}</div>${up}</div></div>`;
+    const ub = this.sheetBody.querySelector('#btnUpgrade');
+    if (ub) this._bindTap(ub, 'upgrade');
+    this.sheet.classList.remove('hidden');
+    this.controls.classList.add('under');
+    this.sheetOpen = 'building';
+  }
+
+  closeSheet() { this.sheet.classList.add('hidden'); this.controls.classList.remove('under'); this.sheetOpen = null; }
+  shakeCard(type) {
+    const c = this.sheetBody.querySelector(`[data-type="${type}"]`) || this.sheetBody.querySelector('#btnUpgrade');
+    if (!c) return; c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
+  }
 
   flash() { this.flashEl.classList.remove('go'); void this.flashEl.offsetWidth; this.flashEl.classList.add('go'); }
   shakeHud() { this.hud.classList.remove('shake'); void this.hud.offsetWidth; this.hud.classList.add('shake'); }
@@ -215,7 +267,6 @@ export class UI {
     this.fx.append(d);
     setTimeout(() => d.remove(), big ? 1700 : 1200);
   }
-
   popIcon(x, y, icon, size = 90) {
     const d = el('div', { class: 'pop bigpop' }, `<img src="${U(icon)}" style="height:${size}px">`);
     d.style.left = x + 'px'; d.style.top = y + 'px';
@@ -231,84 +282,13 @@ export class UI {
     [...we.children].forEach((img, i) => setTimeout(() => img.classList.add('in'), 500 + i * 380));
   }
 
-  // ---------------- hand tutorial
-  handAt(x, y, rot = false) {
+  handAt(x, y, advice = null) {
     this.hand.style.display = 'block';
     this.hand.style.left = (x - 20) + 'px';
     this.hand.style.top = (y - 6) + 'px';
-    this.hand.querySelector('.rot').style.display = rot ? 'block' : 'none';
+    const a = this.hand.querySelector('.advice');
+    a.style.display = advice ? 'block' : 'none';
+    if (advice && a.getAttribute('src') !== U(advice)) a.src = U(advice);
   }
   hideHand() { this.hand.style.display = 'none'; }
-}
-
-// ------------------------------------------------------------------ iso stone drawing
-// Draws polyomino stones with the same projection as the 3D camera (axes in px per world unit).
-// The texture transforms are applied with ctx.transform() on top of the caller's transform, so the
-// stones render correctly on high-DPI canvases (the caller scales by devicePixelRatio).
-export function drawPiece(ctx, piece, ox, oy, ax, H, imgs, alpha = 1, scale = 1, opts = {}) {
-  const ex = { x: ax.ex.x * scale, y: ax.ex.y * scale };
-  const ez = { x: ax.ez.x * scale, y: ax.ez.y * scale };
-  const ey = { x: ax.ey.x * scale * H, y: ax.ey.y * scale * H };
-  const img = piece.gold ? imgs.gold : imgs.lime;
-  const cells = [...piece.cells].sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
-  const P = (x, z, up) => ({ x: ox + x * ex.x + z * ez.x + (up ? ey.x : 0), y: oy + x * ex.y + z * ez.y + (up ? ey.y : 0) });
-  const quad = (a, b, c, d) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath(); };
-  const cellLen = Math.hypot(ex.x, ex.y);
-  const iw = img.width, ih = img.height;
-  const face = (pts, m, shade) => {
-    ctx.save();
-    quad(...pts); ctx.clip();
-    ctx.save(); ctx.transform(m[0] / iw, m[1] / iw, m[2] / ih, m[3] / ih, m[4], m[5]); ctx.drawImage(img, 0, 0); ctx.restore();
-    ctx.fillStyle = shade; ctx.fill();
-    ctx.restore();
-  };
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.lineJoin = 'round';
-  // 1) silhouette: thick dark-violet rim (+ optional golden glow) around the whole stone
-  ctx.save();
-  if (opts.glow) { ctx.shadowColor = piece.gold ? 'rgba(255,210,90,0.95)' : 'rgba(255,214,140,0.75)'; ctx.shadowBlur = cellLen * 0.45; }
-  ctx.fillStyle = '#2a0f45';
-  ctx.strokeStyle = '#2a0f45';
-  ctx.lineWidth = Math.max(2.5, cellLen * 0.11);
-  for (const [x, z] of cells) {
-    const t0 = P(x, z, true), t1 = P(x + 1, z, true), d = P(x + 1, z, false), c = P(x + 1, z + 1, false), h = P(x, z + 1, false), t3 = P(x, z + 1, true);
-    ctx.beginPath(); ctx.moveTo(t0.x, t0.y); ctx.lineTo(t1.x, t1.y); ctx.lineTo(d.x, d.y); ctx.lineTo(c.x, c.y); ctx.lineTo(h.x, h.y); ctx.lineTo(t3.x, t3.y); ctx.closePath();
-    ctx.fill(); ctx.stroke();
-  }
-  ctx.restore();
-  // 2) textured faces, back to front
-  for (const [x, z] of cells) {
-    const a = P(x + 1, z, true), b = P(x + 1, z + 1, true), c = P(x + 1, z + 1, false), d = P(x + 1, z, false);
-    face([a, b, c, d], [ez.x, ez.y, -ey.x, -ey.y, a.x, a.y], 'rgba(50,14,85,0.42)');
-    const e = P(x, z + 1, true), f = P(x + 1, z + 1, true), g = P(x + 1, z + 1, false), h = P(x, z + 1, false);
-    face([e, f, g, h], [ex.x, ex.y, -ey.x, -ey.y, e.x, e.y], 'rgba(70,24,105,0.24)');
-    const t0 = P(x, z, true), t1 = P(x + 1, z, true), t2 = P(x + 1, z + 1, true), t3 = P(x, z + 1, true);
-    face([t0, t1, t2, t3], [ex.x, ex.y, ez.x, ez.y, t0.x, t0.y], 'rgba(255,246,225,0.12)');
-    // block edges
-    ctx.strokeStyle = piece.gold ? 'rgba(110,50,0,0.8)' : 'rgba(80,40,40,0.7)';
-    ctx.lineWidth = Math.max(1, cellLen * 0.035);
-    quad(t0, t1, t2, t3); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(t2.x, t2.y); ctx.lineTo(c.x, c.y); ctx.stroke();
-    // bright bevel highlight on the top face's back edges
-    ctx.strokeStyle = piece.gold ? 'rgba(255,250,200,0.75)' : 'rgba(255,250,235,0.6)';
-    ctx.beginPath(); ctx.moveTo(t3.x, t3.y); ctx.lineTo(t0.x, t0.y); ctx.lineTo(t1.x, t1.y); ctx.stroke();
-  }
-  ctx.restore();
-}
-
-// screen-space centroid offset (from piece origin) of the stone's footprint
-export function pieceCentroid(piece, ax, scale = 1) {
-  let cx = 0, cz = 0;
-  for (const [x, z] of piece.cells) { cx += x + 0.5; cz += z + 0.5; }
-  cx /= piece.cells.length; cz /= piece.cells.length;
-  return { gx: cx, gz: cz, x: (cx * ax.ex.x + cz * ax.ez.x) * scale, y: (cx * ax.ex.y + cz * ax.ez.y) * scale };
-}
-
-export function pieceScreenSize(piece, ax, H, scale = 1) {
-  const [w, h] = extent(piece.cells);
-  const pts = [];
-  for (const [x, z] of [[0, 0], [w, 0], [0, h], [w, h]]) for (const up of [0, 1]) pts.push([(x * ax.ex.x + z * ax.ez.x + up * ax.ey.x * H) * scale, (x * ax.ex.y + z * ax.ez.y + up * ax.ey.y * H) * scale]);
-  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-  return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys), minX: Math.min(...xs), minY: Math.min(...ys) };
 }

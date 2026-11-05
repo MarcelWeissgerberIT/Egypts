@@ -79,3 +79,51 @@ ic.resize((64, 64), Image.LANCZOS).save(os.path.join(OUT, 'favicon.png'), optimi
 import json
 json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
 print(json.dumps(sizes))
+
+# ---------------- production game additions ----------------
+for n in ['r_deben', 'r_worker', 'r_grain', 'r_bread', 'r_stone', 'r_block', 'r_tools', 'r_ore', 'plot', 'bubble']:
+    sizes[n] = ui(n, n + '.png', 160, 160)
+for n in ['btn_up', 'btn_close']:
+    sizes[n] = ui(n, n + '.png', 200, 200)
+
+# building cards: the Meshy reference renders with their white background keyed out
+from collections import deque
+def key_white(im, tol=26):
+    im = im.convert('RGBA')
+    w, h = im.size
+    px = im.load()
+    seen = bytearray(w * h)
+    q = deque()
+    for x in range(w):
+        q.append((x, 0)); q.append((x, h - 1))
+    for y in range(h):
+        q.append((0, y)); q.append((w - 1, y))
+    def whiteish(c):
+        return c[0] > 255 - tol and c[1] > 255 - tol and c[2] > 255 - tol
+    while q:
+        x, y = q.popleft()
+        i = y * w + x
+        if seen[i]:
+            continue
+        seen[i] = 1
+        c = px[x, y]
+        if not whiteish(c):
+            continue
+        px[x, y] = (c[0], c[1], c[2], 0)
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h and not seen[ny * w + nx]:
+                q.append((nx, ny))
+    # soften the cut edge
+    a = im.split()[-1].filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(1.2))
+    im.putalpha(a)
+    return im
+
+for n in ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy']:
+    im = key_white(Image.open(os.path.join(SRC, 'buildings', n + '.png')))
+    im = trim(im)
+    im = fit(im, 240, 240)
+    im.save(os.path.join(OUT, 'ui', 'b_' + n + '.webp'), 'WEBP', quality=88, method=6)
+    sizes['b_' + n] = im.size
+json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
+print('production assets ok')
