@@ -9,7 +9,7 @@ import { Tier, STONE, GOLD } from './logic.js';
 import { randomPiece, rotatePiece, rotate, makePiece } from './pieces.js';
 
 const SAVE_KEY = 'purple-sun-pyramid-v1';
-const SHUFFLE_COST = 6;
+const SHUFFLE_COST = 7;
 
 function loadSave() {
   try {
@@ -165,6 +165,7 @@ class Game {
     this.score = 0; this.shownScore = 0;
     this.lives = 3;
     this.combo = 0;
+    this.timeStats = { left: 0, max: 0 };
     this.tierIndex = 0;
     this.drag = null; this.press = null;
     this.world.setupLevel(this.sizes);
@@ -188,12 +189,11 @@ class Game {
     this.tier = this.tiers[t];
     this.world.showTier(t, this.tier);
     this.world.focusTier(t);
-    this.timeMax = Math.round(this.tier.emptyCount() * this.L.secPerCell + 4);
+    this.timeMax = Math.round(this.tier.emptyCount() * this.L.secPerCell + 3);
     this.timeLeft = this.timeMax;
     this.lastTick = 99;
     this.ui.setTiers(this.sizes.length, t);
-    this.tray = [null, null, null];
-    for (let k = 0; k < 3; k++) this.refillSlot(k);
+    this.refillAll();
     this._checkDeadEnd();
     this.state = 'intro';
     this.introT = 0.7;
@@ -215,10 +215,12 @@ class Game {
     }
     return makePiece('o1');
   }
-  refillSlot(k) {
-    this.tray[k] = this.genPiece(false);
-    if (!this.trayHasFit() && Math.random() < this.L.fair) this.tray[k] = this.genPiece(true);
-    this.tray[k].born = performance.now();
+  // a fresh set of three stones - only once all three have been placed
+  refillAll() {
+    const now = performance.now();
+    this.tray = [0, 1, 2].map(() => this.genPiece(false));
+    if (!this.trayHasFit() && Math.random() < this.L.fair) this.tray[Math.floor(Math.random() * 3)] = this.genPiece(true);
+    this.tray.forEach((p, k) => { p.born = now + k * 90; });
   }
   _checkDeadEnd() {
     const dead = !this.trayHasFit();
@@ -234,7 +236,8 @@ class Game {
     const r = this.ui.btnShuffle.getBoundingClientRect();
     this.ui.popup(r.left - 30, r.top + this.trayH * 0 + 10, SHUFFLE_COST, { icon: 'icon_sun', size: 22, prefix: null });
     const keep = Math.floor(Math.random() * 3);
-    for (let k = 0; k < 3; k++) { this.tray[k] = k === keep ? this.genPiece(true) : this.genPiece(false); this.tray[k].born = performance.now(); }
+    const now = performance.now();
+    for (let k = 0; k < 3; k++) { this.tray[k] = k === keep ? this.genPiece(true) : this.genPiece(false); this.tray[k].born = now + k * 90; }
     this._checkDeadEnd();
     this._drawTray();
   }
@@ -304,7 +307,8 @@ class Game {
     return { ax, scale, ox, oy, cen };
   }
 
-  _lift(piece, ax) { return 34 + pieceScreenSize(piece, ax, H, 1).h * 0.5; }
+  // the stone floats above the finger so the finger never hides the landing spot
+  _lift(piece, ax) { return 46 + pieceScreenSize(piece, ax, H, 1).h * 0.5; }
 
   _updateDrag() {
     const d = this.drag;
@@ -319,23 +323,56 @@ class Game {
     const sx = o1x + 0.5 * g.ax.ex.x + 0.5 * g.ax.ez.x;
     const sy = o1y + 0.5 * g.ax.ex.y + 0.5 * g.ax.ez.y;
     const wp = this.world.screenToPlane(sx, sy, this.world.tierBaseY(t));
+    const prev = d.anchor;
     d.anchor = null;
     if (wp) {
       const fi = wp.x + off, fj = wp.z + off;
       const ri = Math.round(fi), rj = Math.round(fj);
-      let best = null, bd = 9;
-      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
-        const ai = ri + a, aj = rj + b;
-        if (!this.tier.canPlace(d.piece.cells, ai, aj)) continue;
-        const dist = Math.hypot(ai - fi, aj - fj);
-        if (dist < bd) { bd = dist; best = [ai, aj]; }
+      let best = null;
+      if (prev && Math.abs(fi - prev[0]) < 0.72 && Math.abs(fj - prev[1]) < 0.72 && this.tier.canPlace(d.piece.cells, prev[0], prev[1])) {
+        best = prev;   // hysteresis: stay put until the finger clearly moves to another cell
+      } else if (this.tier.canPlace(d.piece.cells, ri, rj)) {
+        best = [ri, rj];
+      } else {
+        // small edge assist: accept a direct neighbour if the finger is close to it
+        let bd = 0.8;
+        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ai = ri + a, aj = rj + b;
+          const dist = Math.hypot(ai - fi, aj - fj);
+          if (dist < bd && this.tier.canPlace(d.piece.cells, ai, aj)) { bd = dist; best = [ai, aj]; }
+        }
       }
       const near = d.piece.cells.some(([x, y]) => { const i = ri + x, j = rj + y; return i >= -1 && j >= -1 && i <= n && j <= n; });
-      if (best && bd < 0.95) { d.anchor = best; this.world.setGhost(t, d.piece.cells, best[0], best[1], true); }
-      else if (near) { d.anchor = null; this.world.setGhost(t, d.piece.cells, ri, rj, false); }
-      else this.world.setGhost();
-    } else this.world.setGhost();
+      if (best) {
+        d.anchor = best;
+        if (!prev || prev[0] !== best[0] || prev[1] !== best[1]) {
+          this.world.setGhost(t, d.piece.cells, best[0], best[1], true, d.piece.gold);
+          this.world.setLinePreview(t, this._linePreview(d.piece.cells, best[0], best[1]));
+          this.audio.snap();
+        }
+      } else if (near) { this.world.setGhost(t, d.piece.cells, ri, rj, false); this.world.setLinePreview(t, null); }
+      else { this.world.setGhost(); this.world.setLinePreview(t, null); }
+    } else { this.world.setGhost(); this.world.setLinePreview(this.tierIndex, null); }
     this._drawDrag(g);
+  }
+
+  // every cell of the rows/columns that this placement would complete
+  _linePreview(cells, ai, aj) {
+    const T = this.tier, n = T.size;
+    const mine = new Set(cells.map(([x, y]) => (aj + y) * n + ai + x));
+    const filled = (i, j) => T.get(i, j) !== 0 || mine.has(j * n + i);
+    const out = [];
+    for (const j of new Set(cells.map(([, y]) => aj + y))) {
+      if (T.rowsDone.has(j)) continue;
+      let ok = true; for (let i = 0; i < n && ok; i++) ok = filled(i, j);
+      if (ok) for (let i = 0; i < n; i++) out.push([i, j]);
+    }
+    for (const i of new Set(cells.map(([x]) => ai + x))) {
+      if (T.colsDone.has(i)) continue;
+      let ok = true; for (let j = 0; j < n && ok; j++) ok = filled(i, j);
+      if (ok) for (let j = 0; j < n; j++) out.push([i, j]);
+    }
+    return out;
   }
 
   _drawDrag(g) {
@@ -344,7 +381,9 @@ class Game {
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.shadowColor = 'rgba(20,0,40,0.5)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 10;
-    drawPiece(ctx, this.drag.piece, g.ox, g.oy, g.ax, H, this.assets.img, this.drag.anchor ? 0.6 : 0.97, g.scale);
+    // once it snaps, the 3D preview on the pyramid takes over and the floating stone fades back
+    if (this.drag.anchor) return;
+    drawPiece(ctx, this.drag.piece, g.ox, g.oy, g.ax, H, this.assets.img, 0.97, g.scale);
   }
   _clearDrag() {
     const c = this.ui.dragCanvas, ctx = c.getContext('2d');
@@ -396,10 +435,10 @@ class Game {
         this.audio.ankh();
         this.world.priestessCast();
         const p = this.world.worldToScreen(this.world.cellWorld(t, i, j).setY(this.world.tierBaseY(t) + H * 1.5));
-        this.ui.popup(p.x, p.y - 10, 4, { icon: 'icon_sun', size: 26 });
+        this.ui.popup(p.x, p.y - 10, 3, { icon: 'icon_sun', size: 26 });
         this.ui.popIcon(p.x, p.y - 70, 'icon_ankh', 70);
       });
-      this.timeLeft = Math.min(this.timeMax, this.timeLeft + 4);
+      this.timeLeft = Math.min(this.timeMax, this.timeLeft + 3);
       pts += 100;
     }
     this.score += pts;
@@ -407,13 +446,15 @@ class Game {
     this.tray[k] = null;
     if (this.tutorial && this.tutorial.phase === 'drag') { this.tutorial.phase = 'rotate'; this.tutorial.t = 0; }
     if (res.complete) { this.tierComplete(); return; }
-    this.refillSlot(k);
+    if (this.tray.every((p) => !p)) this.refillAll();
     this._checkDeadEnd();
     this._drawTray();
   }
 
   tierComplete() {
     this.state = 'transition';
+    this.timeStats.left += Math.max(0, this.timeLeft);
+    this.timeStats.max += this.timeMax;
     this.ui.hideHand();
     this.ui.shuffleHint(false);
     const t = this.tierIndex;
@@ -454,7 +495,9 @@ class Game {
     this.world.priestessDance();
     this.world.workersCheer(8);
     this.world.pharaohCheer();
-    const eyes = this.lives;
+    // Horus eyes: 3 = no scarab lost and a quarter of the sun time left over, 2 = at most one scarab lost
+    const spare = this.timeStats.left / Math.max(1, this.timeStats.max);
+    const eyes = this.lives === 3 && spare >= 0.25 ? 3 : (this.lives === 3 || (this.lives === 2 && spare >= 0.1)) ? 2 : 1;
     const i = this.levelIndex;
     this.save.eyes[i] = Math.max(this.save.eyes[i] || 0, eyes);
     this.save.best[i] = Math.max(this.save.best[i] || 0, this.score);
@@ -537,7 +580,7 @@ class Game {
       const fits = this.tier ? this.fitsAny(p) : true;
       const fitsNow = this.tier ? !!this.tier.anyFit(p.cells) : true;
       let s = this.trayScale;
-      if (p.born && now - p.born < 300) s *= 0.4 + 0.6 * Math.min(1, (now - p.born) / 300);
+      if (p.born && now - p.born < 300) s *= Math.max(0.02, Math.min(1, (now - p.born) / 300)) ** 0.6;
       const cen = pieceCentroid(p, ax, s);
       const size = pieceScreenSize(p, ax, H, s);
       const ox = cx - (size.minX + size.w / 2), oy = cy - (size.minY + size.h / 2);

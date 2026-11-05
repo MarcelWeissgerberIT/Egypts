@@ -12,17 +12,20 @@ Beschriftung, jede Zahl und jeder Knopf ist ein Bild.
 
 * Jede Pyramide besteht aus Stufen (z. B. 7×7 → 5×5 → 3×3). Ganz oben setzt du als Belohnung
   die goldene Spitze.
-* Unten liegen drei Steine. **Ziehen** legt einen Stein auf die aktuelle Stufe (die goldene
-  Vorschau zeigt, wo er landet), **Antippen** dreht ihn um 90°.
+* Unten liegen drei Steine. **Ziehen** legt einen Stein auf die aktuelle Stufe: Der violett
+  umrandete Vorschau-Stein zeigt genau, wo er landet, goldenes Leuchten zeigt Reihen und Spalten,
+  die dadurch fertig würden. **Antippen** dreht einen Stein um 90°.
+* Neue Steine gibt es erst, wenn alle drei verbaut sind – die Reihenfolge will geplant sein.
 * Die **Sonnenleiste** ist die Zeit für die Stufe: Der Tag läuft ab, der Himmel färbt sich purpur.
   Geht die Sonne unter, verlierst du einen **Skarabäus** (3 Leben).
 * Volle Reihen und Spalten geben Punkte und etwas Sonnenzeit, mehrere hintereinander einen
   Kombo-Multiplikator.
 * **Ankh-Felder** abdecken: viel Sonnenzeit und Punkte, die Priesterin wirkt einen Segen.
 * **Goldsteine** zählen dreifach. Roter **Granit** ist schon verbaut und macht die Formen kniffliger.
-* Passt kein Stein mehr? Der **Nil-Knopf** spült alle drei Steine fort (kostet 6 Sekunden Sonne).
-* Die Wertung (1–3 Horusaugen) hängt von den übrigen Skarabäen ab. 6 Level, steigende
-  Schwierigkeit.
+* Passt kein Stein mehr? Der **Nil-Knopf** spült alle drei Steine fort (kostet 7 Sekunden Sonne).
+* Wertung: 3 Horusaugen nur ohne verlorenen Skarabäus und mit mindestens einem Viertel
+  Sonnenzeit übrig, 2 Augen mit höchstens einem verlorenen Skarabäus. 6 Level, steigende
+  Schwierigkeit (knappere Zeit, mehr Granit, seltener garantiert passende Steine).
 
 ## Entwickeln
 

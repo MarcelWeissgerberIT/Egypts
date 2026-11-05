@@ -150,6 +150,11 @@ export class Audio {
     if (gold) { this._tone(1568, 'sine', t + 0.03, 0.003, 0.12, 0.5); this._tone(2093, 'sine', t + 0.07, 0.003, 0.08, 0.5); }
   }
 
+  snap() {
+    if (!this.ok()) return; const t = this.ctx.currentTime;
+    this._tone(1320, 'sine', t, 0.002, 0.05, 0.04);
+  }
+
   invalid() {
     if (!this.ok()) return; const t = this.ctx.currentTime;
     const o = this._tone(160, 'sawtooth', t, 0.005, 0.12, 0.18);

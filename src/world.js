@@ -9,7 +9,7 @@ import { STONE, GOLD, GRANITE } from './logic.js';
 export const H = 0.62;        // tier / block height
 export const FOUND = 0.16;    // foundation plate height
 const ISLAND = 18;            // island half size
-const EL = THREE.MathUtils.degToRad(38);
+const EL = THREE.MathUtils.degToRad(44);
 const AZ = Math.PI / 4;
 
 const tmpV = new THREE.Vector3();
@@ -575,9 +575,27 @@ export class World {
     };
     this.pyr = new THREE.Group();
     this.scene.add(this.pyr);
-    this.ghost = new THREE.InstancedMesh(new THREE.BoxGeometry(0.98, H, 0.98), new THREE.MeshBasicMaterial({ color: 0xffd25a, transparent: true, opacity: 0.45, depthWrite: false }), 6);
-    this.ghost.count = 0; this.ghost.renderOrder = 5;
+    // landing preview: the real stone, hovering translucent exactly where it will land
+    this.ghostMats = {
+      ok: new THREE.MeshStandardMaterial({ map: lime, color: 0xd9c2a0, roughness: 0.75, transparent: true, opacity: 0.94, emissive: 0x9a4dff, emissiveIntensity: 0.2, depthWrite: false }),
+      gold: new THREE.MeshStandardMaterial({ map: goldT, roughness: 0.3, metalness: 0.6, transparent: true, opacity: 0.85, emissive: 0xffb43a, emissiveIntensity: 0.45, depthWrite: false }),
+      bad: new THREE.MeshBasicMaterial({ color: 0xff3d7a, transparent: true, opacity: 0.45, depthWrite: false }),
+    };
+    this.ghost = new THREE.InstancedMesh(this.blockGeo, this.ghostMats.ok, 6);
+    this.ghost.count = 0; this.ghost.renderOrder = 5; this.ghost.frustumCulled = false;
     this.scene.add(this.ghost);
+    // golden rim around the preview (slightly larger back faces)
+    this.ghostRim = new THREE.InstancedMesh(this.blockGeo, new THREE.MeshBasicMaterial({ color: 0xb45cff, side: THREE.BackSide, transparent: true, opacity: 0.95, depthWrite: false }), 6);
+    this.ghostRim.count = 0; this.ghostRim.renderOrder = 4; this.ghostRim.frustumCulled = false;
+    this.scene.add(this.ghostRim);
+    // footprint plates under the preview + glow on rows/columns the move would complete
+    const plateG = new THREE.PlaneGeometry(0.94, 0.94); plateG.rotateX(-Math.PI / 2);
+    this.foot = new THREE.InstancedMesh(plateG, new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }), 6);
+    this.foot.count = 0; this.foot.renderOrder = 4; this.foot.frustumCulled = false;
+    this.scene.add(this.foot);
+    this.linePrev = new THREE.InstancedMesh(plateG, new THREE.MeshBasicMaterial({ color: 0xff9d1c, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }), 200);
+    this.linePrev.count = 0; this.linePrev.renderOrder = 6; this.linePrev.frustumCulled = false;
+    this.scene.add(this.linePrev);
     // grid overlay and ankh markers for the current tier
     this.gridMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: 1 }));
     this.gridMesh.rotation.x = -Math.PI / 2;
@@ -654,7 +672,7 @@ export class World {
     this.camGoal.az = AZ;
     // framing: fit the bottom tier diamond
     const diag = base * Math.SQRT2;
-    this.camGoal.W = Math.max(diag * 1.2 + 2.6, 11);
+    this.camGoal.W = Math.max(diag * 1.08 + 1.4, 9.5);
     this.cam.W = this.camGoal.W * 1.35;
     this.camGoal.ty = FOUND + 0.3;
     this.cam.target.y = this.camGoal.ty;
@@ -808,22 +826,43 @@ export class World {
   }
 
   // ghost preview of where a stone would land
-  setGhost(t, cells, ai, aj, valid) {
-    if (!cells) { this.ghost.count = 0; return; }
+  setGhost(t, cells, ai, aj, valid, gold = false) {
+    if (!cells) { this.ghost.count = 0; this.ghostRim.count = 0; this.foot.count = 0; this.linePrev.count = 0; return; }
     const n = this.tierSizes[t];
     let c = 0;
     for (const [x, y] of cells) {
       const i = ai + x, j = aj + y;
       if (i < -1 || j < -1 || i > n || j > n) continue;
       const p = this.cellWorld(t, i, j);
+      p.y += valid ? 0.06 : 0.02;   // hovers a hair above its slot
       tmpM.compose(p, tmpQ.identity(), tmpS.set(1, 1, 1));
-      this.ghost.setMatrixAt(c++, tmpM);
+      this.ghost.setMatrixAt(c, tmpM);
+      tmpM.compose(p, tmpQ, tmpS.set(1.16, 1.2, 1.16));
+      this.ghostRim.setMatrixAt(c, tmpM);
+      tmpS.set(1, 1, 1);
+      tmpM.compose(tmpV.set(p.x, this.tierBaseY(t) + 0.02, p.z), tmpQ, tmpS);
+      this.foot.setMatrixAt(c, tmpM);
+      c++;
     }
-    this.ghost.count = c;
-    this.ghost.instanceMatrix.needsUpdate = true;
-    this.ghost.material.color.set(valid ? 0xffd25a : 0xff3d7a);
+    this.ghost.count = c; this.foot.count = valid ? c : 0; this.ghostRim.count = valid ? c : 0;
+    this.ghost.instanceMatrix.needsUpdate = true; this.foot.instanceMatrix.needsUpdate = true; this.ghostRim.instanceMatrix.needsUpdate = true;
+    this.ghost.material = valid ? (gold ? this.ghostMats.gold : this.ghostMats.ok) : this.ghostMats.bad;
     this.ghostValid = valid;
   }
+
+  // glow on top of every cell of the rows/columns the previewed move would complete
+  setLinePreview(t, cells) {
+    let c = 0;
+    if (cells) for (const [i, j] of cells) {
+      if (c >= 200) break;
+      const p = this.cellWorld(t, i, j);
+      tmpM.compose(tmpV.set(p.x, this.tierBaseY(t) + H + 0.1, p.z), tmpQ.identity(), tmpS.set(1, 1, 1));
+      this.linePrev.setMatrixAt(c++, tmpM);
+    }
+    this.linePrev.count = c;
+    this.linePrev.instanceMatrix.needsUpdate = true;
+  }
+
 
   // ------------------------------------------------------------------ characters API
   pharaohCheer() { this.pharaoh.play('Cheer', { once: true, after: 'Idle' }); }
@@ -967,7 +1006,12 @@ export class World {
       m.icon.position.y = this.tierBaseY(this.currentTier) + 0.62 + Math.sin(this.time * 2.4 + m.seed) * 0.1;
     }
     this.glyphMat.opacity = 0.75 + Math.sin(this.time * 3) * 0.25;
-    this.ghost.material.opacity = 0.38 + Math.sin(this.time * 9) * 0.12;
+    const pulse = Math.sin(this.time * 7);
+    this.ghostMats.ok.emissiveIntensity = 0.18 + pulse * 0.1;
+    this.ghostRim.material.opacity = 0.8 + pulse * 0.2;
+    this.ghostMats.gold.emissiveIntensity = 0.4 + pulse * 0.15;
+    this.ghostMats.bad.opacity = 0.38 + pulse * 0.1;
+    this.linePrev.material.opacity = 0.4 + Math.sin(this.time * 10) * 0.18;
     if (this.capstone.visible) this.capstone.material.emissiveIntensity = 0.45 + Math.sin(this.time * 3) * 0.2;
     // camera easing
     const c = this.cam, g = this.camGoal;
