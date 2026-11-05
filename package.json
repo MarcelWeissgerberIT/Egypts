@@ -1,0 +1,17 @@
+{
+  "name": "purple-sun-pyramid",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "serve": "npx --yes http-server dist -p 8080 -c-1"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.1.1",
+    "esbuild": "^0.24.0"
+  }
+}

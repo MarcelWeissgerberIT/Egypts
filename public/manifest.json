@@ -1,0 +1,13 @@
+{
+  "name": "Purpursonne Pyramide",
+  "short_name": "Purpursonne",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#1b0b30",
+  "theme_color": "#2a1146",
+  "icons": [
+    { "src": "assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

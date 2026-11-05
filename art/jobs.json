@@ -1,0 +1,15 @@
+{"meshy":{
+"worker":"74ddbbec-8e4c-4eef-94ad-d65d5dcb16fe",
+"pharaoh":"9e938236-8a81-41dd-8997-04bf5140ed76",
+"priestess":"6d1d9b36-0e3d-496b-b670-0eef796dac3f",
+"sphinx":"ad4ab68f-f69e-48cc-ba3f-624a8a1d4b74",
+"obelisk":"4afe5d0b-18c4-4c0d-9215-84080f715b87",
+"palm":"2380f550-67ea-4bb4-baa2-1a0a7ca9146a",
+"camel":"d31e5f2e-d3d0-426a-b69c-e2ca2d4cd836",
+"sledge":"4fe86451-b268-41e5-b126-2ec4b6ab4df6",
+"temple":"485f13f9-8771-4f94-83ce-678adc92a4fe",
+"anubis":"475f4c6f-916a-4f3d-bc56-56dc82c7b65b",
+"boat":"503c377c-9d80-4b9b-a3d3-45c182fcbf3f",
+"brazier":"d52682ba-227e-4bfd-bf8a-b7aed7f8d061"}}
+{"rig":{"worker_walk":"a42c88af-2cf1-4132-8ee3-4dbbd0455748","worker_cheer":"69e2d9c5-2b28-4546-b19a-ed16a183f475","worker_idle":"6848bba5-eefb-496e-985a-81778a17b572","pharaoh_cheer":"3b724177-d76f-4884-a6a5-5fe1febea633","pharaoh_stomp":"24a8694c-f4c0-441d-8479-63a06b6f2098","priestess_cast":"de1f45d4-c687-4c9c-b428-e356eae75299","priestess_dance":"7087fd0a-33e0-4f9f-a58c-4f8f9d3da141"},
+"audio":{"music":"c5b05efe-4ccd-40aa-bace-ddbfd310053e","fanfare":"a560a451-0f63-4764-94d3-4e9702070cb1"}}

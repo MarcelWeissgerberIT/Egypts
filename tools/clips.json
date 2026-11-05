@@ -1,0 +1,7 @@
+[["worker_walk","anim_worker_walk","Walk"],
+ ["worker_cheer","anim_worker_cheer","Cheer"],
+ ["worker_idle","anim_worker_idle","Idle"],
+ ["pharaoh_cheer","anim_pharaoh_cheer","Cheer"],
+ ["pharaoh_stomp","anim_pharaoh_stomp","Stomp"],
+ ["priestess_cast","anim_priestess_cast","Cast"],
+ ["priestess_dance","anim_priestess_dance","Dance"]]

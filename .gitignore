@@ -1,0 +1,4 @@
+node_modules/
+# raw Higgsfield/Meshy downloads (large); web-ready copies live in public/assets
+art/src/*/
+dist/
