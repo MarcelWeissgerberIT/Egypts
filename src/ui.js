@@ -20,7 +20,7 @@ function button(id, img, cls = '') { return el('div', { id, class: 'btn ' + cls,
 const ico = (k, h, cls = '') => `<img class="${cls}" src="${U(k)}" style="height:${h}px">`;
 const arrow = '<div class="arrow"></div>';
 
-export const RES_KEYS = ['worker', 'bread', 'grain', 'stone', 'block', 'ore', 'tools'];
+export const RES_KEYS = ['worker', 'bread', 'grain', 'stone', 'block', 'ore', 'tools', 'granite'];
 
 export class UI {
   constructor(app) {
@@ -80,6 +80,12 @@ export class UI {
     this.sheetBody = this.sheet.querySelector('.sheetBody');
     app.append(this.sheet);
     this._bindTap(this.sheetClose, 'closeSheet');
+
+    this.routeBar = el('div', { id: 'routeBar', class: 'hidden' }, `<div class="rb"></div>`);
+    this.routeCancel = button('routeCancel', 'btn_close');
+    this.routeBar.append(this.routeCancel);
+    app.append(this.routeBar);
+    this._bindTap(this.routeCancel, 'routeCancel');
 
     this.fx = el('div', { id: 'fx' });
     this.flashEl = el('div', { id: 'flash' });
@@ -230,27 +236,83 @@ export class UI {
   openBuildingSheet(info) {
     const pips = [0, 1, 2].map((i) => `<div class="pip ${i < info.level ? 'done' : ''}"></div>`).join('');
     let recipe = '';
-    if (info.type === 'house') recipe = `${ico('r_worker', 30)}<div class="digits">${digitsHTML(info.workers, 22)}</div><div class="sep"></div>${ico('r_bread', 28)}${ico('icon_sun', 24)}<div class="digits">${digitsHTML(info.eat, 18)}</div>`;
+    if (info.type === 'house') recipe = `${ico('r_worker', 30)}<div class="digits">${digitsHTML(info.workers, 22)}</div><div class="sep"></div>${ico('r_bread', 28)}<div class="digits">${digitsHTML(info.pantry, 18)}</div>`;
     else recipe = `${info.inputs.map((g) => ico('r_' + g, 30)).join('')}${info.inputs.length ? arrow : ''}${ico('r_' + info.output, 34)}${info.outN > 1 ? `<div class="digits">${digitsHTML(info.outN, 18, 'x')}</div>` : ''}<div class="sep"></div>${ico('icon_sun', 24)}<div class="digits">${digitsHTML(info.cycle, 18)}</div>`;
+    const stock = info.type === 'house' ? '' : `<div class="stock">${info.stockIn.map(([g, n]) => `<div class="cost">${ico('r_' + g, 20)}<div class="digits">${digitsHTML(n, 15)}</div></div>`).join('')}${info.output ? `${arrow}<div class="cost${info.outFull ? ' short' : ''}">${ico('r_' + info.output, 20)}<div class="digits">${digitsHTML(info.outStock, 15)}</div></div>` : ''}</div>`;
     const status = info.status ? `<div class="status">${ico('bubble', 54, 'bub')}${ico(info.status, 30, 'sicon')}</div>` : '';
     let up = '';
     if (info.level < info.maxLevel) {
-      up = `<div class="upgrade btn${info.canUpgrade ? '' : ' off'}" id="btnUpgrade">${ico('btn_up', 64)}
-        <div class="cost${info.money ? '' : ' short'}">${ico('r_deben', 20)}<div class="digits">${digitsHTML(info.upCost, 16)}</div></div>
-        ${info.upStaff ? `<div class="cost${info.hands ? '' : ' short'}">${ico('r_worker', 20)}<div class="digits">${digitsHTML(info.upStaff, 16, 'plus')}</div></div>` : ''}</div>`;
-    } else up = `<div class="maxed">${ico('icon_eye', 46)}</div>`;
+      up = `<div class="upgrade btn${info.canUpgrade ? '' : ' off'}" id="btnUpgrade">${ico('btn_up', 52)}
+        <div class="cost${info.money ? '' : ' short'}">${ico('r_deben', 18)}<div class="digits">${digitsHTML(info.upCost, 14)}</div></div>
+        ${info.upStaff ? `<div class="cost${info.hands ? '' : ' short'}">${ico('r_worker', 18)}<div class="digits">${digitsHTML(info.upStaff, 14, 'plus')}</div></div>` : ''}</div>`;
+    } else up = `<div class="maxed">${ico('icon_eye', 40)}</div>`;
+    const routeBtn = info.canRoute ? `<div class="routeBtn btn" id="btnRoute">${ico('btn_route', 52)}</div>` : '';
+    const routes = (info.routes || []).map((r) => `<div class="routeRow">
+        ${ico('t_' + r.ttype, 34)}${ico('r_' + r.good, 22)}${arrow}${ico(r.to === 'site' ? 'icon_pyramid' : 'b_' + r.to, 34)}
+        <div class="digits">${digitsHTML(r.vehicles, 16, 'x')}</div>
+        <div class="btn mini${r.canAdd ? '' : ' off'}" data-add="${r.id}">${ico('btn_add', 34)}</div>
+        <div class="btn mini" data-del="${r.id}">${ico('btn_close', 30)}</div></div>`).join('');
     this.sheetBody.innerHTML = `<div class="binfo"><div class="bleft"><img class="bimg big" src="${U('b_' + info.type)}">${status}</div>
-      <div class="bright"><div class="pips">${pips}</div><div class="recipe big">${recipe}</div>${up}</div></div>`;
+      <div class="bright"><div class="pips">${pips}</div><div class="recipe big">${recipe}</div>${stock}<div class="actions">${up}${routeBtn}</div></div></div>
+      ${routes ? `<div class="routes">${routes}</div>` : ''}`;
     const ub = this.sheetBody.querySelector('#btnUpgrade');
     if (ub) this._bindTap(ub, 'upgrade');
+    const rb = this.sheetBody.querySelector('#btnRoute');
+    if (rb) this._bindTap(rb, 'route');
+    this.sheetBody.querySelectorAll('[data-add]').forEach((e) => this._bindTap(e, 'addVehicle', +e.getAttribute('data-add')));
+    this.sheetBody.querySelectorAll('[data-del]').forEach((e) => this._bindTap(e, 'delRoute', +e.getAttribute('data-del')));
     this.sheet.classList.remove('hidden');
     this.controls.classList.add('under');
     this.sheetOpen = 'building';
   }
 
+  openSiteSheet(info) {
+    const pips = [0, 1, 2].map((i) => `<div class="pip ${i < info.level ? 'done' : ''}"></div>`).join('');
+    let up = '';
+    if (info.level < 3) up = `<div class="upgrade btn${info.canUpgrade ? '' : ' off'}" id="btnUpgrade">${ico('btn_up', 52)}
+        <div class="cost${info.money ? '' : ' short'}">${ico('r_deben', 18)}<div class="digits">${digitsHTML(info.upCost, 14)}</div></div>
+        <div class="cost${info.hands ? '' : ' short'}">${ico('r_worker', 18)}<div class="digits">${digitsHTML(info.upStaff, 14, 'plus')}</div></div></div>`;
+    else up = `<div class="maxed">${ico('icon_eye', 40)}</div>`;
+    const status = info.status ? `<div class="status">${ico('bubble', 54, 'bub')}${ico(info.status, 30, 'sicon')}</div>` : '';
+    this.sheetBody.innerHTML = `<div class="binfo"><div class="bleft"><img class="bimg big" src="${U('icon_pyramid')}" style="padding:10%">${status}</div>
+      <div class="bright"><div class="pips">${pips}</div>
+      <div class="recipe big">${ico('r_' + info.need, 34)}${arrow}${ico('icon_pyramid', 34)}<div class="sep"></div>${ico('icon_sun', 24)}<div class="digits">${digitsHTML(info.secs, 18)}</div></div>
+      <div class="stock"><div class="cost">${ico('r_block', 20)}<div class="digits">${digitsHTML(info.block, 15)}</div></div>${info.granite !== null ? `<div class="cost">${ico('r_granite', 20)}<div class="digits">${digitsHTML(info.granite, 15)}</div></div>` : ''}</div>
+      <div class="actions">${up}</div></div></div>`;
+    const ub = this.sheetBody.querySelector('#btnUpgrade');
+    if (ub) this._bindTap(ub, 'upgrade');
+    this.sheet.classList.remove('hidden');
+    this.controls.classList.add('under');
+    this.sheetOpen = 'site';
+  }
+
+  openTransportSheet(opts) {
+    let h = '<div class="cards">';
+    for (const o of opts) {
+      h += `<div class="card btn${o.ok ? '' : ' off'}" data-t="${o.type}">
+        <img class="bimg" src="${U('t_' + o.type)}">
+        <div class="cost">${ico('r_' + o.good, 18)}<div class="digits">${digitsHTML(o.cap, 15, 'x')}</div></div>
+        <div class="cost">${ico('icon_speed', 18)}<div class="digits">${digitsHTML(o.speed, 15)}</div></div>
+        <div class="cost${o.money ? '' : ' short'}">${ico('r_deben', 18)}<div class="digits">${digitsHTML(o.cost, 15)}</div></div>
+        <div class="cost${o.hands ? '' : ' short'}">${ico('r_worker', 18)}<div class="digits">${digitsHTML(o.staff, 15)}</div></div>
+      </div>`;
+    }
+    this.sheetBody.innerHTML = h + '</div>';
+    this.sheetBody.querySelectorAll('.card').forEach((c) => this._bindTap(c, 'pickTransport', c.getAttribute('data-t')));
+    this.sheet.classList.remove('hidden');
+    this.controls.classList.add('under');
+    this.sheetOpen = 'transport';
+  }
+
+  showRouteBar(fromType, good) {
+    this.routeBar.querySelector('.rb').innerHTML = `${ico(fromType === 'site' ? 'icon_pyramid' : 'b_' + fromType, 46)}${ico('r_' + good, 30)}${arrow}${ico('icon_target', 40, 'pulse')}`;
+    this.routeBar.classList.remove('hidden');
+  }
+  hideRouteBar() { this.routeBar.classList.add('hidden'); }
+
   closeSheet() { this.sheet.classList.add('hidden'); this.controls.classList.remove('under'); this.sheetOpen = null; }
   shakeCard(type) {
-    const c = this.sheetBody.querySelector(`[data-type="${type}"]`) || this.sheetBody.querySelector('#btnUpgrade');
+    const c = this.sheetBody.querySelector(`[data-type="${type}"]`) || this.sheetBody.querySelector(`[data-t="${type}"]`) || this.sheetBody.querySelector('#btnUpgrade');
     if (!c) return; c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
   }
 

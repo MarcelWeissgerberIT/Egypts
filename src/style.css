@@ -201,3 +201,20 @@ img { -webkit-user-drag: none; user-select: none; pointer-events: none; }
 
 #controls.under { opacity: 0; }
 #controls.under .btn { pointer-events: none; }
+
+/* ================= routes ================= */
+.stock { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.actions { display: flex; gap: 14px; align-items: center; justify-content: center; }
+.routeBtn img { filter: drop-shadow(0 0 10px rgba(255,210,100,.8)); }
+.routes { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.routeRow { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 14px; background: rgba(255,230,180,.08); border: 1px solid rgba(230,181,74,.5); }
+.routeRow .mini { width: 34px; height: 34px; margin-left: auto; }
+.routeRow .mini + .mini { margin-left: 0; }
+.routeRow .mini.off { filter: grayscale(.8) brightness(.6); }
+#routeBar { position: absolute; left: 50%; top: calc(var(--sat) + 150px); transform: translateX(-50%); z-index: 31; display: flex; align-items: center; gap: 8px; padding: 8px 54px 8px 14px; border-radius: 26px;
+  background: linear-gradient(180deg, rgba(58,20,98,.96), rgba(24,6,44,.97)); border: 3px solid #7dffb0; box-shadow: 0 0 0 3px rgba(20,80,50,.8), 0 0 24px rgba(120,255,170,.45); transition: opacity .25s, transform .3s; }
+#routeBar.hidden { opacity: 0; transform: translate(-50%, -20px); pointer-events: none; }
+#routeBar .rb { display: flex; align-items: center; gap: 6px; }
+#routeBar .pulse { animation: bounce .45s infinite alternate; }
+#routeCancel { position: absolute; right: 6px; top: 50%; width: 42px; height: 42px; margin-top: -21px; }
+.card .cost { min-width: 70%; justify-content: center; }

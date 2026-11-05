@@ -127,3 +127,16 @@ for n in ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy']:
     sizes['b_' + n] = im.size
 json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
 print('production assets ok')
+
+# ---------------- route game additions ----------------
+for n in ['btn_route', 'btn_add']:
+    sizes[n] = ui(n, n + '.png', 200, 200)
+for n in ['t_porter', 't_sledge', 't_ox', 't_boat', 'r_granite', 'icon_speed', 'icon_full', 'icon_target']:
+    sizes[n] = ui(n, n + '.png', 180, 180)
+for n in ['quay', 'granite']:
+    im = key_white(Image.open(os.path.join(SRC, 'v3', n + '.png')))
+    im = trim(im); im = fit(im, 240, 240)
+    im.save(os.path.join(OUT, 'ui', 'b_' + n + '.webp'), 'WEBP', quality=88, method=6)
+tex('mudbrick', '../v3/mudbrick.png', (512, 512))
+json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
+print('route assets ok')

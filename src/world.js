@@ -12,6 +12,19 @@ const ISLAND = 18;            // island half size
 const EL = THREE.MathUtils.degToRad(44);
 const AZ = Math.PI / 4;
 const BUILD_SIZE = 2.5;       // building footprint (world units)
+const HEAVY_GOODS = new Set(['stone', 'block', 'granite']);
+// labourers working at each building: offset in building space (x right, z towards camera), clip, tool
+const JOBS = {
+  quarry: [{ o: [1.2, 0.95], anim: 'Hammer', prop: 'mallet' }, { o: [-1.05, 1.0], anim: 'Pick' }],
+  mason: [{ o: [1.15, 0.9], anim: 'Chop', prop: 'chisel' }],
+  farm: [{ o: [0.45, 0.8], anim: 'Reap', prop: 'sickle' }],
+  bakery: [{ o: [1.1, 0.95], anim: 'Place' }],
+  smithy: [{ o: [1.1, 0.95], anim: 'Hammer', prop: 'mallet' }],
+  mine: [{ o: [1.15, 0.95], anim: 'Hammer', prop: 'mallet' }],
+  granite: [{ o: [1.2, 0.95], anim: 'Hammer', prop: 'mallet' }, { o: [-1.05, 1.0], anim: 'Chop', prop: 'chisel' }],
+  quay: [{ o: [1.05, 0.9], anim: 'Pick' }],
+  house: [{ o: [1.1, 1.0], anim: 'Talk' }],
+};
 
 const tmpV = new THREE.Vector3();
 const tmpM = new THREE.Matrix4();
@@ -94,6 +107,9 @@ export class World {
     this.updaters = [];
     this.iconTex = {};
     this.bviews = new Map();
+    this.routeViews = new Map();
+    this.vehicleViews = new Map();
+    this.cheerT = 0;
 
     this._lights();
     this._island();
@@ -103,6 +119,7 @@ export class World {
     this._characters();
     this._particles();
     this._pyramidSetup();
+    this._siteSetup();
     this.resize();
   }
 
@@ -172,7 +189,7 @@ export class World {
     }
     // soft dunes
     const duneM = new THREE.MeshStandardMaterial({ map: this._tex('sand', 3), roughness: 1 });
-    for (const [x, z, r] of [[-13, -12, 3.5], [12, -13, 3], [3, -15, 2.4], [-15, -3, 2.4], [15.5, 14, 2.6], [-15, 15, 2.6]]) {
+    for (const [x, z, r] of [[12, -13, 3], [3, -15, 2.4], [15.5, 14, 2.6], [-15, 15, 2.6]]) {
       const d = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), duneM);
       d.scale.set(1.6, 0.32, 1); d.rotation.y = Math.random() * Math.PI;
       d.position.set(x, -0.05, z); d.receiveShadow = true;
@@ -273,6 +290,7 @@ export class World {
       c.beginPath(); c.arc(w / 2, w / 2, w * 0.42, 0, Math.PI * 2); c.stroke();
     });
     const pt = { fertile: patch('fertile'), rock: patch('rock'), desert: patch('desert') };
+    pt.bank = pt.desert; pt.farbank = pt.rock;
     this.plotViews = {};
     for (const p of PLOTS) {
       const pos = uv(p.u, p.v);
@@ -325,17 +343,13 @@ export class World {
       m.rotation.y = AZ + rot;
       return m;
     };
-    place('temple', 4.4, 0, 20.4, 0, { receive: true });      // across the Nile
-    place('obelisk', 4.2, -3.6, 9.0);
-    place('obelisk', 4.2, 3.6, 9.0);
-    place('anubis', 1.7, -1.7, 10.2, 0.15);
-    place('anubis', 1.7, 1.7, 10.2, -0.15);
+    place('temple', 4.4, 0, 22.8, 0, { receive: true });      // across the Nile
+    place('obelisk', 4.2, -4.2, 9.4);
+    place('obelisk', 4.2, 4.2, 9.4);
+    place('anubis', 1.7, -9.6, 5.6, 0.4);
+    place('anubis', 1.7, 9.6, 5.6, -0.4);
     place('sphinx', 2.3, 9.8, 9.4, -0.5);
     place('sphinx', 2.3, -9.8, 9.4, 0.5);
-    const pave = this._tex('limestone', 1); pave.repeat.set(2, 3);
-    const way = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 4.6), new THREE.MeshStandardMaterial({ map: pave, color: 0xe6d2b8, roughness: 0.9 }));
-    way.rotation.x = -Math.PI / 2; way.rotation.z = AZ; way.position.copy(uv(0, 9.6)); way.position.y = 0.015; way.receiveShadow = true;
-    this.scene.add(way);
     const camels = [[-9.8, 13.6, 1.2], [9.9, 13.4, -1.1]];
     const palms = [[-8.6, 14.6], [8.6, 14.6], [0, 15.0], [-10.6, 11.2], [10.8, 11.0], [-9.2, 3.2], [-9.4, -3.6], [-8.8, -8.8], [8.4, -12.4], [-5.2, 19.0], [5.2, 19.0], [-2.6, 18.6], [2.6, 18.6], [-8.6, 17.6], [8.6, 17.6], [0, -13.6]];
     palms.forEach(([u, v], i) => {
@@ -356,7 +370,7 @@ export class World {
     });
     // braziers at the site corners
     this.fires = [];
-    for (const [u, v] of [[-1.5, 7.9], [1.5, 7.9], [-8.6, 0], [-3.9, -12.9], [3.9, -12.9]]) {
+    for (const [u, v] of [[-8.4, 0], [8.4, 0], [-3.9, -12.9], [3.9, -12.9]]) {
       const b = place('brazier', 0.85, u, v);
       this.fires.push(b.position.clone().setY(0.92));
     }
@@ -394,7 +408,7 @@ export class World {
   _characters() {
     const A = this.assets.models;
     const clip = (name) => A[name]?.animations?.[0];
-    const mk = (name, height, clips, add = true) => {
+    const mk = (name, height, clips) => {
       const root = SkeletonUtils.clone(A[name].scene);
       root.traverse((m) => {
         if (m.isMesh) {
@@ -405,7 +419,7 @@ export class World {
       const g = new THREE.Group();
       root.scale.multiplyScalar(height / 1.75);
       g.add(root);
-      if (add) this.scene.add(g);
+      this.scene.add(g);
       const actor = new Actor(root, clips);
       actor.group = g;
       this.actors.push(actor);
@@ -420,106 +434,263 @@ export class World {
     this.priestess.group.rotation.y = AZ - 0.15;
     this.priestess.play('Idle');
 
-    // carriers (goods between buildings) and sledge haulers (blocks to the pyramid)
-    const wClips = { Carry: A.worker.animations[0], Walk: clip('anim_worker_walk'), Cheer: clip('anim_worker_cheer'), Idle: clip('anim_worker_idle') };
-    this.carriers = [];
-    for (let i = 0; i < 8; i++) {
-      const w = mk('worker', 1.05, wClips);
-      w.group.visible = false;
-      const ic = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false }));
-      ic.scale.set(0.55, 0.55, 1); ic.position.y = 1.45; ic.renderOrder = 12;
-      w.group.add(ic);
-      w.iconSprite = ic; w.busy = false;
-      this.carriers.push(w);
-    }
-    this.haulers = [];
-    for (let i = 0; i < 4; i++) {
-      const w = mk('worker', 1.05, wClips);
-      w.group.visible = false;
-      const sl = this._model('sledge', 0.62);
-      sl.visible = false;
-      w.sledge = sl; w.busy = false;
-      this.haulers.push(w);
-    }
-    // idle builders who cheer at milestones
-    this.crowd = [];
-    for (const [u, v, r] of [[-1.3, -7.4, 0.5], [1.3, -7.4, -0.5]]) {
-      const w = mk('worker', 1.05, wClips);
-      w.group.position.copy(uv(u, v)); w.group.rotation.y = AZ + r;
-      w.play('Idle');
-      this.crowd.push(w);
+    // the light-weight rigged labourer (Meshy) with all work clips; falls back to the hero worker
+    const lp = !!A.worker_lp;
+    const inplace = (c) => {
+      if (!c) return c;
+      c = c.clone();
+      for (const tr of c.tracks) {
+        if (/Hips\.position$/.test(tr.name)) {
+          const v = tr.values, x0 = v[0], z0 = v[2];
+          for (let i = 0; i < v.length; i += 3) { v[i] = x0; v[i + 2] = z0; }
+        }
+      }
+      return c;
+    };
+    const L = (n) => clip('anim_lp_' + n);
+    this.workerClips = lp ? {
+      Idle: A.worker_lp.animations[0], Walk: L('walk'), Carry: L('carry'), Hammer: L('hammer'), Chop: L('chop'), Reap: L('reap'),
+      Pick: L('pick'), Place: L('place'), Push: inplace(L('push')), Lever: L('lever'), Water: inplace(L('water')), Cheer: L('cheer'), Talk: L('talk'), Shrug: L('shrug'),
+    } : { Idle: clip('anim_worker_idle'), Walk: clip('anim_worker_walk'), Carry: A.worker.animations[0], Cheer: clip('anim_worker_cheer') };
+    for (const k of Object.keys(this.workerClips)) if (!this.workerClips[k]) this.workerClips[k] = this.workerClips.Idle;
+    this._mkWorker = () => {
+      const w = mk(lp ? 'worker_lp' : 'worker', 1.05, this.workerClips);
+      w.rh = w.root.getObjectByName('RightHand'); w.rf = w.root.getObjectByName('RightForeArm');
+      return w;
+    };
+    this.workerPool = [];
+    this._props();
+  }
+
+  _getWorker() {
+    const w = this.workerPool.pop() || this._mkWorker();
+    w.group.visible = true; w.active = true; w.prop = null;
+    return w;
+  }
+  _freeWorker(w) {
+    if (!w) return;
+    w.group.visible = false; w.active = false;
+    if (w.propMesh) { w.propMesh.visible = false; w.propMesh = null; }
+    w.current = null;
+    this.workerPool.push(w);
+  }
+
+  // hand tools, oriented every frame along the forearm -> hand direction
+  _props() {
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.85 });
+    const copper = new THREE.MeshStandardMaterial({ color: 0xd88a4a, metalness: 0.8, roughness: 0.35 });
+    const make = (kind) => {
+      const g = new THREE.Group();
+      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.42, 6), wood);
+      handle.position.y = 0.16; g.add(handle);
+      if (kind === 'mallet') { const h = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.11, 0.11), wood); h.position.y = 0.38; g.add(h); }
+      if (kind === 'chisel') { const h = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.1), wood); h.position.y = 0.36; g.add(h); const c = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.12, 4), copper); c.position.y = -0.08; c.rotation.x = Math.PI; g.add(c); }
+      if (kind === 'sickle') { const b = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.014, 4, 12, Math.PI * 1.1), copper); b.position.set(0.1, 0.4, 0); g.add(b); }
+      g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+      g.visible = false;
+      this.scene.add(g);
+      return g;
+    };
+    this._propPool = { mallet: [], chisel: [], sickle: [] };
+    this._makeProp = make;
+  }
+  _giveProp(w, kind) {
+    if (!kind) { if (w.propMesh) { w.propMesh.visible = false; this._propPool[w.propKind].push(w.propMesh); w.propMesh = null; } return; }
+    if (w.propKind === kind && w.propMesh) return;
+    if (w.propMesh) { w.propMesh.visible = false; this._propPool[w.propKind].push(w.propMesh); }
+    w.propMesh = this._propPool[kind].pop() || this._makeProp(kind);
+    w.propMesh.visible = true; w.propKind = kind;
+  }
+  _updateProps() {
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3();
+    for (const w of this.actors) {
+      if (!w.propMesh || !w.group.visible || !w.rh || !w.rf) continue;
+      w.rh.getWorldPosition(b); w.rf.getWorldPosition(a);
+      d.copy(b).sub(a).normalize();
+      w.propMesh.position.copy(b);
+      w.propMesh.quaternion.setFromUnitVectors(UP, d);
     }
   }
 
-  // route around the pyramid if the straight line would cross it
-  _route(from, to) {
-    const R = (this.pyrRadius || 5) + 0.9;
-    const inside = (p) => { const q = toUV(p); return Math.abs(q.u) + Math.abs(q.v) < R; };
-    let crosses = false;
-    for (let k = 1; k < 10; k++) if (inside(from.clone().lerp(to, k / 10))) { crosses = true; break; }
-    if (!crosses) return [from, to];
-    const corners = [uv(R + 0.4, 0), uv(-R - 0.4, 0), uv(0, R + 0.4), uv(0, -R - 0.4)];
-    let best = null, bl = Infinity;
-    for (const c of corners) { const l = from.distanceTo(c) + c.distanceTo(to); if (l < bl) { bl = l; best = c; } }
-    return [from, best, to];
-  }
+  // ------------------------------------------------------------------ routes + vehicles
+  _uvToWorld(p, y = 0) { const w = uv(p.u, p.v); w.y = y; return w; }
 
-  sendCarrier(from, to, iconKey) {
-    const w = this.carriers.find((c) => !c.busy);
-    if (!w) return false;
-    w.busy = true;
-    w.path = this._route(from.clone().setY(0), to.clone().setY(0));
-    w.seg = 0; w.segT = 0;
-    w.speed = 1.9;
-    w.iconSprite.material.map = this.icon(iconKey); w.iconSprite.material.needsUpdate = true;
-    w.group.visible = true;
-    w.group.position.copy(w.path[0]);
-    w.play('Carry');
-    return true;
-  }
-
-  sendHauler(from, to) {
-    const w = this.haulers.find((c) => !c.busy);
-    if (!w) return false;
-    w.busy = true;
-    w.path = this._route(from.clone().setY(0), to.clone().setY(0));
-    w.seg = 0; w.segT = 0; w.speed = 1.6;
-    w.group.visible = true; w.sledge.visible = true;
-    w.play('Walk', { speed: 0.85 });
-    return true;
-  }
-
-  _walk(w, dt) {
-    const a = w.path[w.seg], b = w.path[w.seg + 1];
-    const len = a.distanceTo(b) || 0.001;
-    w.segT += (w.speed * dt) / len;
-    if (w.segT >= 1) {
-      w.seg++; w.segT = 0;
-      if (w.seg >= w.path.length - 1) return true;
-      return false;
+  addRoute(r) {
+    const color = { porter: 0xffd36b, sledge: 0xd59cff, ox: 0xffa860, boat: 0x7fe3ff }[r.type];
+    if (!this._arrowTex) {
+      this._arrowTex = canvasTex(64, 64, (c, w, h) => {
+        c.fillStyle = 'rgba(255,255,255,0.95)';
+        c.beginPath(); c.moveTo(14, 10); c.lineTo(40, 32); c.lineTo(14, 54); c.lineTo(26, 54); c.lineTo(52, 32); c.lineTo(26, 10); c.closePath(); c.fill();
+      });
+      this._arrowTex.wrapS = THREE.RepeatWrapping;
     }
-    w.group.position.copy(a).lerp(b, w.segT);
-    const dir = b.clone().sub(a);
-    const target = faceDir(dir.x, dir.z);
-    w.group.rotation.y += Math.atan2(Math.sin(target - w.group.rotation.y), Math.cos(target - w.group.rotation.y)) * Math.min(1, dt * 10);
-    w.dir = dir.normalize();
-    return false;
+    const g = new THREE.Group();
+    const pts = r.pts.map((p) => this._uvToWorld(p));
+    const mats = [];
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      const len = a.distanceTo(b);
+      const tex = this._arrowTex.clone(); tex.needsUpdate = true; tex.wrapS = THREE.RepeatWrapping; tex.repeat.set(len / 0.55, 1);
+      const m = new THREE.MeshBasicMaterial({ map: tex, color, transparent: true, opacity: 0.9, depthWrite: false });
+      mats.push(m);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.5), m);
+      plane.rotation.x = -Math.PI / 2;
+      const holder = new THREE.Group();
+      holder.add(plane);
+      holder.position.copy(a).lerp(b, 0.5); holder.position.y = r.type === 'boat' ? 0.12 : 0.05;
+      holder.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+      plane.renderOrder = 3;
+      g.add(holder);
+    }
+    this.scene.add(g);
+    this.routeViews.set(r.id, { r, g, mats, pts, lens: pts.slice(1).map((p, i) => p.distanceTo(pts[i])) });
   }
 
-  _updateWorkers(dt) {
-    for (const w of this.carriers) {
-      if (!w.busy) continue;
-      if (this._walk(w, dt)) { w.busy = false; w.group.visible = false; }
+  removeRoute(r) {
+    const v = this.routeViews.get(r.id);
+    if (v) { this.scene.remove(v.g); this.routeViews.delete(r.id); }
+    for (const veh of r.vehicles) this._dropVehicle(veh.id);
+  }
+
+  _pointOn(view, f) {
+    const total = view.lens.reduce((a, b) => a + b, 0);
+    let d = THREE.MathUtils.clamp(f, 0, 1) * total;
+    for (let i = 0; i < view.lens.length; i++) {
+      if (d <= view.lens[i] || i === view.lens.length - 1) {
+        const t = view.lens[i] ? Math.min(1, d / view.lens[i]) : 0;
+        const a = view.pts[i], b = view.pts[i + 1];
+        return { p: a.clone().lerp(b, t), dir: b.clone().sub(a).normalize() };
+      }
+      d -= view.lens[i];
     }
-    for (const w of this.haulers) {
-      if (!w.busy) continue;
-      if (this._walk(w, dt)) { w.busy = false; w.group.visible = false; w.sledge.visible = false; continue; }
-      const d = w.dir || new THREE.Vector3(1, 0, 0);
-      w.sledge.position.copy(w.group.position).addScaledVector(d, -1.1);
-      w.sledge.rotation.y = Math.atan2(d.z, -d.x);
+    return { p: view.pts[0].clone(), dir: new THREE.Vector3(1, 0, 0) };
+  }
+
+  _sledge() {
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x9a6a35, roughness: 0.9 });
+    for (const s of [-0.22, 0.22]) {
+      const run = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.06, 0.07), wood); run.position.set(0, 0.04, s); g.add(run);
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.07), wood); tip.position.set(0.54, 0.09, s); tip.rotation.z = 0.6; g.add(tip);
     }
-    for (const w of this.crowd) {
-      if (w.cheering > 0) { w.cheering -= dt; if (w.cheering <= 0) w.play('Idle'); }
+    for (let k = -2; k <= 2; k++) { const sl = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.56), wood); sl.position.set(k * 0.2, 0.09, 0); g.add(sl); }
+    const cargo = new THREE.Group(); cargo.position.y = 0.11; g.add(cargo);
+    g.userData.cargo = cargo;
+    g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    this.scene.add(g);
+    return g;
+  }
+  _cargoMesh(good) {
+    const mat = good === 'granite' ? this.graniteMat : good === 'stone' ? this.rawStoneMat : this.blockMat;
+    const m = new THREE.Mesh(good === 'stone' ? this.rawStoneGeo : this.cargoGeo, mat);
+    m.castShadow = true;
+    return m;
+  }
+  _setCargo(holder, good, n) {
+    const key = good + n;
+    if (holder.userData.key === key) return;
+    holder.userData.key = key;
+    holder.clear();
+    if (!n) return;
+    if (!HEAVY_GOODS.has(good)) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.icon('r_' + good), transparent: true, depthWrite: false }));
+      s.scale.set(0.5, 0.5, 1); s.position.y = 0.35; s.renderOrder = 12; holder.add(s);
+      return;
+    }
+    for (let i = 0; i < n; i++) { const c = this._cargoMesh(good); c.position.set((i % 2 - 0.5) * 0.36 * (n > 1 ? 1 : 0), 0.17 + Math.floor(i / 2) * 0.3, 0); holder.add(c); }
+  }
+
+  _vehicleView(v, r) {
+    let vv = this.vehicleViews.get(v.id);
+    if (vv) return vv;
+    vv = { type: r.type };
+    if (r.type === 'porter') { vv.w = this._getWorker(); vv.icon = new THREE.Group(); vv.icon.position.y = 1.25; vv.w.group.add(vv.icon); }
+    else if (r.type === 'sledge') { vv.w = this._getWorker(); vv.sl = this._sledge(); }
+    else if (r.type === 'ox') { vv.m = this._model('oxcart', 1.0, { footprint: 1.9 }); vv.w = this._getWorker(); }
+    else if (r.type === 'boat') { vv.m = this._model('boat', 1.5); vv.cargo = new THREE.Group(); vv.cargo.position.y = 0.45; vv.m.add(vv.cargo); }
+    this.vehicleViews.set(v.id, vv);
+    return vv;
+  }
+
+  _dropVehicle(id) {
+    const vv = this.vehicleViews.get(id);
+    if (!vv) return;
+    if (vv.icon) { vv.icon.clear(); vv.w.group.remove(vv.icon); }
+    if (vv.w) this._freeWorker(vv.w);
+    if (vv.sl) this.scene.remove(vv.sl);
+    if (vv.m) this.scene.remove(vv.m);
+    this.vehicleViews.delete(id);
+  }
+
+  syncVehicles(eco) {
+    for (const r of eco.routes) {
+      const view = this.routeViews.get(r.id);
+      if (!view) continue;
+      for (const v of r.vehicles) {
+        const vv = this._vehicleView(v, r);
+        const f = v.progress ?? 0;
+        const { p, dir } = this._pointOn(view, f);
+        const back = v.phase === 'back';
+        const moving = v.phase === 'go' || v.phase === 'back';
+        const fwd = back ? dir.clone().negate() : dir;
+        const yaw = Math.atan2(fwd.x, fwd.z);
+        const loaded = v.load > 0;
+        // keep several vehicles on one route from overlapping while they wait
+        const idx = +v.id.split(':')[1] || 0;
+        if (!moving) p.add(new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar((idx - 1) * 0.55));
+        if (vv.type === 'porter') {
+          vv.w.group.position.copy(p);
+          vv.w.group.rotation.y = yaw;
+          vv.w.play(moving ? (loaded ? 'Carry' : 'Walk') : (v.phase === 'wait' ? 'Idle' : 'Place'));
+          this._setCargo(vv.icon, r.good, loaded ? 1 : 0);
+        } else if (vv.type === 'sledge') {
+          // the sledge leads, the labourer pushes from behind
+          vv.sl.position.copy(p); vv.sl.rotation.y = Math.atan2(-fwd.z, fwd.x);
+          this._setCargo(vv.sl.userData.cargo, r.good, v.load);
+          vv.w.group.position.copy(p).addScaledVector(fwd, -0.75);
+          vv.w.group.rotation.y = yaw;
+          vv.w.play(moving ? (loaded ? 'Push' : 'Walk') : 'Idle');
+        } else if (vv.type === 'ox') {
+          vv.m.position.copy(p); vv.m.rotation.y = Math.atan2(-fwd.z, fwd.x) + Math.PI;
+          vv.m.position.y = moving ? Math.abs(Math.sin(this.time * 6)) * 0.03 : 0;
+          vv.w.group.position.copy(p).add(new THREE.Vector3(-fwd.z, 0, fwd.x).multiplyScalar(0.7));
+          vv.w.group.rotation.y = yaw;
+          vv.w.play(moving ? 'Walk' : 'Idle');
+        } else if (vv.type === 'boat') {
+          vv.m.position.copy(p); vv.m.position.y = 0.05 + Math.sin(this.time * 1.8 + idx) * 0.03;
+          vv.m.rotation.y = Math.atan2(-fwd.z, fwd.x);
+          this._setCargo(vv.cargo, r.good, Math.min(2, v.load));
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ route mode highlights
+  setTargets(list) {
+    if (!this.targetViews) this.targetViews = [];
+    for (const t of this.targetViews) this.scene.remove(t);
+    this.targetViews = [];
+    if (!list) return;
+    if (!this._ringTex) this._ringTex = canvasTex(256, 256, (c, w) => {
+      c.strokeStyle = 'rgba(120,255,170,0.95)'; c.lineWidth = 12; c.shadowColor = 'rgba(120,255,170,1)'; c.shadowBlur = 16;
+      c.beginPath(); c.arc(w / 2, w / 2, w * 0.4, 0, Math.PI * 2); c.stroke();
+    });
+    for (const { pos, height, source } of list) {
+      const ring = new THREE.Mesh(new THREE.CircleGeometry(1.65, 32), new THREE.MeshBasicMaterial({ map: this._ringTex, transparent: true, depthWrite: false, color: source ? 0xffd36b : 0xffffff }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(pos.x, 0.06, pos.z); ring.renderOrder = 4;
+      const arrow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.icon('icon_target'), transparent: true, depthWrite: false }));
+      arrow.scale.set(0.8, 0.8, 1); arrow.position.set(pos.x, (height || 2) + 1.0, pos.z); arrow.renderOrder = 15;
+      arrow.visible = !source;
+      arrow.userData.base = arrow.position.y; ring.userData.pulse = true;
+      this.scene.add(ring, arrow);
+      this.targetViews.push(ring, arrow);
+    }
+  }
+  _updateTargets() {
+    if (!this.targetViews) return;
+    for (const t of this.targetViews) {
+      if (t.isSprite) t.position.y = t.userData.base + Math.abs(Math.sin(this.time * 4)) * 0.35;
+      else { const s = 1 + Math.sin(this.time * 5) * 0.06; t.scale.set(s, s, 1); }
     }
   }
 
@@ -557,7 +728,15 @@ export class World {
     bubble.scale.set(1.0, 1.1, 1); bubble.position.y = model.userData.height + 1.05; bubble.visible = false; bubble.renderOrder = 13;
     g.add(bubble);
     this.scene.add(g);
-    const view = { b, g, model, scaffold, pips, bubble, pos: pv.pos.clone(), bubbleKey: null, grow: instant ? 1 : 0, bump: 0 };
+    const view = { b, g, model, scaffold, pips, bubble, pos: pv.pos.clone(), bubbleKey: null, grow: instant ? 1 : 0, bump: 0, jobs: [] };
+    for (const job of JOBS[b.type] || []) {
+      const w = this._getWorker();
+      const k = BUILD_SIZE / 2.5;
+      const off = new THREE.Vector3(job.o[0] * k, 0, job.o[1] * k).applyAxisAngle(UP, AZ);
+      w.group.position.copy(pv.pos).add(off);
+      w.group.rotation.y = Math.atan2(-off.x, -off.z) + 0.35;
+      view.jobs.push({ w, job, seed: Math.random() * 10 });
+    }
     if (instant) { scaffold.visible = false; model.scale.set(1, 1, 1); }
     else { model.scale.set(1, 0.02, 1); for (let k = 0; k < 6; k++) this._dust(pv.pos, 1.3); }
     this.bviews.set(b.id, view);
@@ -623,6 +802,17 @@ export class World {
         const k = Math.max(0.02, 1 - b.buildT / 3);
         v.model.scale.set(1, k, 1);
         if (Math.random() < dt * 4) this._dust(v.pos, 1.2);
+      }
+      for (const j of v.jobs) {
+        let anim = 'Idle', prop = null;
+        const st = b.state;
+        if (this.cheerT > 0) anim = 'Cheer';
+        else if (!b.built) { anim = 'Hammer'; prop = 'mallet'; }
+        else if (b.type === 'house') anim = st === 'hungry' ? 'Shrug' : 'Talk';
+        else if (st === 'work' || st === 'noTools') { anim = j.job.anim; prop = j.job.prop; }
+        else anim = Math.floor((this.time + j.seed) / 4) % 3 === 0 ? 'Shrug' : 'Idle';
+        j.w.play(anim);
+        this._giveProp(j.w, prop);
       }
       if (v.bump > 0) {
         v.bump = Math.max(0, v.bump - dt);
@@ -810,9 +1000,14 @@ export class World {
     this.capToken = (this.capToken || 0) + 1;
     this.orbit = false;
     this.camGoal.az = AZ;
-    for (const v of this.bviews.values()) this.scene.remove(v.g);
+    for (const v of this.bviews.values()) { this.scene.remove(v.g); for (const j of v.jobs || []) { this._giveProp(j.w, null); this._freeWorker(j.w); } }
     this.bviews.clear();
-    for (const w of [...this.carriers, ...this.haulers]) { w.busy = false; w.group.visible = false; if (w.sledge) w.sledge.visible = false; }
+    for (const v of [...this.vehicleViews.keys()]) this._dropVehicle(v);
+    for (const v of this.routeViews.values()) this.scene.remove(v.g);
+    this.routeViews.clear();
+    this.setTargets(null);
+    this._siteLevel();
+    this.rampGoal = this.tierBaseY(0);
     this.floodGoal = 0; this.floodWarn = false; this.storm = false;
     this.cam.az = AZ + 0.5;
     const c0 = uv(0, 1.2);
@@ -835,7 +1030,7 @@ export class World {
     return uv(q.u / L * R, q.v / L * R);
   }
 
-  placeBlock(index) {
+  placeBlock(index, good = 'block') {
     const o = this.order[index];
     if (!o) return null;
     const [t, i, j] = o;
@@ -843,12 +1038,14 @@ export class World {
     const idx = m.count++;
     const p = this.cellWorld(t, i, j);
     const v = 0.9 + Math.random() * 0.14;
-    m.setColorAt(idx, new THREE.Color(v, v * (0.98 + Math.random() * 0.03), v * (0.95 + Math.random() * 0.05)));
+    if (good === 'granite') m.setColorAt(idx, new THREE.Color(v * 1.05, v * 0.52, v * 0.55));
+    else m.setColorAt(idx, new THREE.Color(v, v * (0.98 + Math.random() * 0.03), v * (0.95 + Math.random() * 0.05)));
     m.instanceColor.needsUpdate = true;
     tmpM.compose(p, tmpQ.identity(), tmpS.set(0.0001, 0.0001, 0.0001));
     m.setMatrixAt(idx, tmpM);
     m.instanceMatrix.needsUpdate = true;
-    this.anims.push({ idx, p, t: 0, dur: 0.32, drop: 2.2 });
+    const from = this.rampInfo ? this.rampTop() : p.clone().setY(p.y + 2.2);
+    this.anims.push({ idx, p, from, t: 0, dur: 0.55, drop: 0 });
     return p;
   }
 
@@ -866,10 +1063,13 @@ export class World {
       }
       if (an.t < 0) continue;
       const fall = Math.min(1, an.t / (an.dur * 0.7));
-      const y = an.p.y + an.drop * (1 - fall * fall);
       let sy = 1, sx = 1;
       if (fall >= 1) { const q = (an.t - an.dur * 0.7) / (an.dur * 0.3); sy = 1 - Math.sin(Math.min(1, q) * Math.PI) * 0.16; sx = 1 + (1 - sy) * 0.5; }
-      tmpM.compose(tmpV.set(an.p.x, y - (1 - sy) * H * 0.5, an.p.z), tmpQ.identity(), tmpS.set(sx, sy, sx));
+      // slide/lift from the ramp top over the steps into the slot
+      const e = easeInOut(fall);
+      tmpV.copy(an.from).lerp(an.p, e);
+      tmpV.y += Math.sin(e * Math.PI) * 0.6 - (1 - sy) * H * 0.5;
+      tmpM.compose(tmpV, tmpQ.identity(), tmpS.set(sx, sy, sx));
       if (fall >= 1 && !an.landed) {
         an.landed = true;
         for (let d = 0; d < 3; d++) {
@@ -904,13 +1104,168 @@ export class World {
     }
   }
 
+  // ------------------------------------------------------------------ construction site
+  _siteSetup() {
+    this.rampMat = [
+      new THREE.MeshStandardMaterial({ map: this._tex('mudbrick', 1), roughness: 0.95, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ map: (() => { const t = this._tex('mudbrick', 1); t.repeat.set(4, 0.6); return t; })(), roughness: 1, color: 0xd8b48a, side: THREE.DoubleSide }),
+    ];
+    this.ramp = new THREE.Group();
+    this.scene.add(this.ramp);
+    this.cargoGeo = new RoundedBoxGeometry(0.34, 0.28, 0.32, 2, 0.04);
+    this.rawStoneGeo = new THREE.DodecahedronGeometry(0.2, 0);
+    this.rawStoneMat = new THREE.MeshStandardMaterial({ map: this._tex('limestone', 1), color: 0xd9c9b4, roughness: 0.95, flatShading: true });
+    this.graniteMat = new THREE.MeshStandardMaterial({ map: this._tex('bedrock', 1), color: 0xe8a0a0, roughness: 0.5 });
+    this.stock = new THREE.InstancedMesh(this.blockGeo, this.blockMat, 12);
+    this.stockG = new THREE.InstancedMesh(this.blockGeo, this.graniteMat, 12);
+    for (const m of [this.stock, this.stockG]) { m.count = 0; m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; this.scene.add(m); }
+    this.crew = null;
+  }
+
+  _rampGeom(base, Y) {
+    const h = base / 2, z0 = -(h + 0.3), z1 = -(h + 1.75);
+    const x0 = -h - 1.5, x1 = h - 0.2;
+    this.rampInfo = { x0, x1, zc: (z0 + z1) / 2, h };
+    const g = new THREE.BufferGeometry();
+    const yTop = Math.max(0.05, Y);
+    // wedge: bottom rectangle + sloped top
+    const P = [[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1], [x0, 0.04, z0], [x1, yTop, z0], [x1, yTop, z1], [x0, 0.04, z1]];
+    const faces = [[4, 5, 6, 7, 0], [0, 1, 5, 4, 1], [3, 7, 6, 2, 1], [1, 2, 6, 5, 1]];
+    const pos = [], uvs = [], groups = [];
+    let idx = 0;
+    for (const [a, b, c, d, mat] of faces) {
+      const q = [P[a], P[b], P[c], P[d]];
+      const len = Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]) || 1;
+      const uvq = [[0, 0], [len / 1.5, 0], [len / 1.5, 1], [0, 1]];
+      for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(...q[k]); uvs.push(...uvq[k]); }
+      groups.push({ start: idx, count: 6, mat }); idx += 6;
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    for (const gr of groups) g.addGroup(gr.start, gr.count, gr.mat);
+    g.computeVertexNormals();
+    return g;
+  }
+
+  _buildRamp(Y) {
+    this.ramp.clear();
+    const mesh = new THREE.Mesh(this._rampGeom(this.tierSizes[0], Y), this.rampMat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    // wooden sleepers across the slope
+    const { x0, x1, zc } = this.rampInfo;
+    const wood = new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 0.9 });
+    for (let x = x0 + 0.5; x < x1 - 0.2; x += 0.55) {
+      const t = (x - x0) / (x1 - x0);
+      const s = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 1.35), wood);
+      s.position.set(x, 0.04 + t * (Y - 0.04) + 0.02, zc);
+      s.rotation.z = Math.atan2(Y, x1 - x0);
+      this.ramp.add(s);
+    }
+    this.ramp.add(mesh);
+    this.rampY = Y;
+  }
+
+  _rampPoint(f) {
+    const { x0, x1, zc } = this.rampInfo;
+    const x = x0 + (x1 - x0) * f;
+    return new THREE.Vector3(x, 0.04 + f * (this.rampY - 0.04) + 0.03, zc);
+  }
+
+  _siteLevel() {
+    const base = this.tierSizes[0];
+    this._buildRamp(this.tierBaseY(0));
+    for (const w of this.crew ? Object.values(this.crew) : []) this._freeWorker(w);
+    if (this.crewSledge) this.scene.remove(this.crewSledge);
+    this.crew = { pusher: this._getWorker(), water: this._getWorker(), setterA: this._getWorker(), setterB: this._getWorker(), boss: this._getWorker() };
+    this.crewSledge = this._sledge();
+    const dock = this.rampInfo;
+    this.dockPos = new THREE.Vector3(dock.x0 - 0.9, 0, dock.zc + 0.2);
+    this.crew.boss.group.position.copy(this.dockPos).add(new THREE.Vector3(-0.2, 0, 1.2));
+    this.crew.boss.group.rotation.y = AZ;
+    this.crew.boss.play('Talk');
+    this._giveProp(this.crew.setterA, null);
+    this.siteT = 0;
+    this._placeSetters(0);
+  }
+
+  _placeSetters(t) {
+    if (!this.crew) return;
+    const n = this.tierSizes[Math.min(t, this.tierSizes.length - 1)], hh = n / 2;
+    const y = this.tierBaseY(Math.min(t, this.tierSizes.length - 1));
+    const { x1 } = this.rampInfo;
+    const xs = Math.min(x1 - 0.4, hh - 0.6);
+    this.crew.setterA.group.position.set(xs, y, -hh + 0.5);
+    this.crew.setterB.group.position.set(xs - 0.9, y, -hh + 0.55);
+    this.crew.setterA.group.rotation.y = -Math.PI / 2 + 0.4;
+    this.crew.setterB.group.rotation.y = Math.PI / 2 - 0.4;
+  }
+
+  setSiteTier(t) {
+    const Y = this.tierBaseY(Math.min(t, this.tierSizes.length - 1));
+    this.rampGoal = Y;
+    this._placeSetters(t);
+  }
+
+  // site: { working, frac (0..1 of the current placing cycle), stock: {block, granite} }
+  updateSite(s, dt) {
+    if (!this.crew) return;
+    if (this.rampGoal !== undefined && Math.abs(this.rampGoal - this.rampY) > 0.01) {
+      this._buildRamp(this.rampY + Math.sign(this.rampGoal - this.rampY) * Math.min(Math.abs(this.rampGoal - this.rampY), dt * 0.8));
+    }
+    const c = this.crew;
+    const f = s.working ? s.frac : 0.47;
+    // 0..0.45 down empty, 0.45..0.5 load at the foot, 0.5..0.95 up loaded, 0.95..1 setting the stone
+    let rp, loaded, phase;
+    if (f < 0.45) { rp = 1 - f / 0.45; loaded = false; phase = 'down'; }
+    else if (f < 0.5) { rp = 0; loaded = true; phase = 'load'; }
+    else if (f < 0.95) { rp = (f - 0.5) / 0.45; loaded = true; phase = 'up'; }
+    else { rp = 1; loaded = true; phase = 'set'; }
+    if (!s.working) { rp = 0; loaded = false; phase = 'wait'; }
+    const p = this._rampPoint(rp);
+    const up = new THREE.Vector3(1, 0, 0);
+    const dir = phase === 'down' ? up.clone().negate() : up;
+    this.crewSledge.position.copy(p);
+    this.crewSledge.rotation.y = 0;
+    this.crewSledge.rotation.z = Math.atan2(this.rampY, this.rampInfo.x1 - this.rampInfo.x0);
+    this._setCargo(this.crewSledge.userData.cargo, s.good || 'block', loaded ? 1 : 0);
+    c.pusher.group.position.copy(p).addScaledVector(up, phase === 'down' ? 0.75 : -0.75);
+    c.pusher.group.position.y = this._rampPoint(Math.max(0, rp - 0.07)).y;
+    c.pusher.group.rotation.y = Math.atan2(dir.x, dir.z);
+    c.pusher.play(phase === 'up' ? 'Push' : phase === 'down' ? 'Walk' : 'Idle');
+    // water carrier wets the slope ahead of the sledge
+    const wp = THREE.MathUtils.clamp(phase === 'up' ? rp + 0.18 : (Math.sin(this.time * 0.5) * 0.5 + 0.5), 0, 1);
+    const wpos = this._rampPoint(wp); wpos.z += 0.45;
+    c.water.group.position.copy(wpos);
+    c.water.group.rotation.y = Math.PI / 2;
+    c.water.play(s.working ? 'Water' : 'Idle');
+    if (s.working && phase === 'up' && Math.random() < dt * 4) this.spawn('glow', wpos.clone().add(new THREE.Vector3(0.4, 0.05, -0.3)), { life: 0.6, size: 0.25, color: 0x7fd8ff, vel: new THREE.Vector3(0, 0.3, 0) });
+    const setting = phase === 'set' || (phase === 'up' && rp > 0.85);
+    c.setterA.play(setting ? 'Lever' : 'Idle');
+    c.setterB.play(setting ? 'Pick' : 'Idle');
+    this._giveProp(c.setterA, null);
+    // stock pile at the foot of the ramp
+    const put = (mesh, n, row) => {
+      mesh.count = Math.min(12, n);
+      for (let i = 0; i < mesh.count; i++) {
+        const col = i % 4, lay = Math.floor(i / 4);
+        tmpM.compose(tmpV.set(this.dockPos.x - 0.5 - row * 1.1 + (lay % 2) * 0.1, H / 2 + lay * H * 0.98, this.dockPos.z - 1.2 + col * 1.0), tmpQ.identity(), tmpS.set(1, 1, 1));
+        mesh.setMatrixAt(i, tmpM);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    put(this.stock, s.stock.block || 0, 0);
+    put(this.stockG, s.stock.granite || 0, 1);
+  }
+
+  rampTop() { return this._rampPoint(1).add(new THREE.Vector3(0, 0.3, 0)); }
+
   // ------------------------------------------------------------------ characters API
   pharaohCheer() { this.pharaoh.play('Cheer', { once: true, after: 'Idle' }); }
   pharaohStomp() { this.pharaoh.play('Stomp', { once: true, after: 'Idle' }); }
   priestessCast() { this.priestess.play('Cast', { once: true, after: 'Idle' }); }
   priestessDance() { this.priestess.play('Dance'); }
   priestessIdle() { this.priestess.play('Idle'); }
-  crowdCheer(dur = 2.4) { for (const w of this.crowd) { w.cheering = dur; w.play('Cheer'); } }
+  crowdCheer(dur = 2.4) { this.cheerT = dur; }
   setFlood(on) { this.floodGoal = on ? 1 : 0; if (on) this.floodWarn = false; }
   setStorm(on) { this.storm = on; }
 
@@ -984,7 +1339,7 @@ export class World {
     const t = this.cam.target;
     t.x += dx; t.z += dz;
     const q = toUV(t);
-    const u = THREE.MathUtils.clamp(q.u, -9, 9), v = THREE.MathUtils.clamp(q.v, -12, 16);
+    const u = THREE.MathUtils.clamp(q.u, -9, 9), v = THREE.MathUtils.clamp(q.v, -12, 20);
     const p = uv(u, v); t.x = p.x; t.z = p.z;
   }
   zoom(f) { this.camGoal.W = THREE.MathUtils.clamp(this.camGoal.W * f, 9, 28); this.cam.W = THREE.MathUtils.clamp(this.cam.W * f, 9, 28); }
@@ -1019,16 +1374,26 @@ export class World {
     return rc.ray.intersectPlane(new THREE.Plane(UP, -planeY), pt) ? pt : null;
   }
 
-  // nearest plot to a tap (checks the ground spot and the middle of a building)
+  // plot under a tap: first the ground spot under the finger, then the bodies of tall buildings
   pickPlot(x, y) {
-    let best = null, bd = 56;
+    const g = this.screenToPlane(x, y, 0);
+    let best = null, bd = 1.55;
+    if (g) for (const v of Object.values(this.plotViews)) {
+      const d = Math.hypot(v.pos.x - g.x, v.pos.z - g.z);
+      if (d < bd) { bd = d; best = v.plot.id; }
+    }
+    if (best) { this._lastPickDist = 0; return best; }
+    let bp = 46;
     for (const v of Object.values(this.plotViews)) {
-      for (const hy of [0.2, 1.0, 1.8]) {
+      const bv = [...this.bviews.values()].find((q) => q.b.plot === v.plot.id);
+      if (!bv) continue;
+      for (const hy of [0.8, 1.6]) {
         const s = this.worldToScreen(v.pos.clone().setY(hy));
         const d = Math.hypot(s.x - x, s.y - y);
-        if (d < bd) { bd = d; best = v.plot.id; }
+        if (d < bp) { bp = d; best = v.plot.id; }
       }
     }
+    this._lastPickDist = bp;
     return best;
   }
 
@@ -1036,8 +1401,10 @@ export class World {
   update(dt, gdt = dt) {
     this.time += dt;
     for (const f of [...this.updaters]) f(dt);
-    for (const a of this.actors) a.update(a === this.pharaoh || a === this.priestess || this.crowd.includes(a) ? dt : gdt);
-    this._updateWorkers(gdt);
+    if (this.cheerT > 0) this.cheerT -= dt;
+    for (const a of this.actors) if (a.group.visible) a.update(a === this.pharaoh || a === this.priestess ? dt : gdt);
+    this._updateProps();
+    this._updateTargets();
     this._updateBuildings(dt);
     this._updateParticles(dt);
     this._updateBlocks(dt);

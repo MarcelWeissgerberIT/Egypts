@@ -8,37 +8,39 @@ Ziffern, 3D-Figuren, Musik und Fanfare wurden mit **Higgsfield** erzeugt, die 3D
 Rigs und Animationen mit **Meshy** (über Higgsfield). Im Spiel gibt es keine Schrift: jede
 Beschriftung, jede Zahl und jeder Knopf ist ein Bild.
 
-## Spielprinzip – Pyramidenwerk
+## Spielprinzip – Pyramidenwerk mit eigenen Transportrouten
 
-Du baust eine Produktionswirtschaft auf, die die Pyramide Block für Block wachsen lässt.
+Du baust Betriebe und verbindest sie selbst mit Transportrouten. Waren bewegen sich nur über
+deine Routen; jeder Betrieb hat ein kleines eigenes Lager.
 
-* **Bauplätze antippen** öffnet das Baumenü (nur passende Gebäude für Sand, Fels oder Nilufer).
-  Jede Karte zeigt Kosten in Deben, benötigte Arbeiter und die Produktionskette als Symbole.
-* **Gebäude antippen** zeigt Stufe, Produktion und den Ausbau (schneller, braucht +1 Arbeiter).
-* **Wischen** verschiebt die Kamera, **zwei Finger** zoomen, der Knopf unten rechts schaltet
-  die Geschwindigkeit (x1, x2, x3).
+* **Bauplatz antippen**: Baumenü (passend zu Sand, Fels, Nilufer, Kai-Ufer oder anderem Nilufer).
+* **Betrieb antippen**: Stufe, Produktion, Lagerbestand, Ausbau – und der **Routen-Knopf**.
+  Danach das leuchtende Ziel antippen (Betrieb oder Baustelle) und das Transportmittel wählen.
+  Jede Route zeigt Fahrzeuge (+ fügt eines hinzu, ✕ löscht die Route).
+* **Baustelle antippen**: benötigter Stein, Lager am Rampenfuß, Ausbau der Rampenmannschaft.
+* **Wischen** verschiebt die Kamera, **zwei Finger** zoomen, unten rechts: Tempo x1–x3.
 
-Produktionsketten:
+| Transport | Kosten | Arbeiter | Ladung | Tempo | Darf |
+|---|---|---|---|---|---|
+| Träger | 0 | 1 | 1 | schnell | nur leichte Waren (Getreide, Brot, Erz, Werkzeug) |
+| Schlittentrupp | 20 | 1 | 2 | langsam | alles an Land |
+| Ochsenkarren | 45 | 1 | 4 | mittel | alles an Land |
+| Nilboot | 60 | 1 | 4 | mittel | Granit vom anderen Ufer zum Kai |
 
-| Gebäude | Bauplatz | Verbraucht | Erzeugt |
-|---|---|---|---|
-| Arbeiterhaus | Sand | Brot | Arbeiter |
-| Getreidefeld | Nilufer | – | Getreide |
-| Bäckerei | Sand | Getreide | Brot |
-| Steinbruch | Fels | (Werkzeug ab Level 3) | Rohstein |
-| Steinmetz | Sand | Rohstein | Quader |
-| Kupfermine | Fels | – | Erz |
-| Schmiede | Sand | Erz | Werkzeug |
+Ketten: Steinbruch → Steinmetz → Baustelle · Feld → Bäckerei → Arbeiterhäuser (gemeinsame
+Vorratskammer) · Kupfermine → Schmiede → Steinbruch (ab Level 3) · Granitbruch → Nilboot → Kai
+→ Baustelle (obere Stufen ab Level 4).
 
-* Quader ziehen Arbeiter auf Schlitten zur Pyramide. Jeder verbaute Quader bringt Deben,
-  jede fertige Stufe einen Bonus. Ganz oben setzt du die goldene Spitze.
-* Ohne Brot streiken die Arbeiter (die Produktion halbiert sich etwa), ohne Werkzeug arbeitet
-  der Steinbruch viel langsamer.
-* Die **Nilflut** setzt die Felder regelmäßig unter Wasser, danach wächst das Getreide schneller.
-  In Level 5 bremsen zusätzlich **Sandstürme**.
-* Die Sonnenleiste ist die Regierungszeit des Pharaos. Horusaugen: 3 bei Fertigstellung in
-  höchstens 75 % der Zeit, 2 bei höchstens 90 %.
-* Die Fristen sind mit `tools/balance_sim.mjs` (ein Bot, der nach Regeln baut) eingestellt.
+Die **Baustelle** ist echt animiert: Eine Lehmziegel-Rampe wächst mit jeder Stufe, ein
+Schlittentrupp schiebt die Quader hinauf, ein Wasserträger nässt die Bahn, oben setzen Arbeiter
+die Blöcke mit Hebeln, am Rampenfuß stapelt sich der Vorrat und ein Aufseher gibt Kommandos.
+In den **Betrieben** arbeiten Meshy-Figuren mit eigenen Animationen und Werkzeugen (Hämmern,
+Meißeln, Ernten mit der Sichel, Brot einlegen, Erz aufheben); fehlt Material, zucken sie mit den
+Schultern.
+
+Herausforderung: Regierungszeit des Pharaos (Sonnenleiste), Hunger-Streiks ohne Brot, Nilflut
+über den Feldern, Sandstürme in Level 5. Horusaugen: 3 bei höchstens 75 % der Zeit, 2 bei 90 %.
+Fristen sind mit `tools/balance_sim.mjs` (ein Bot, der Betriebe und Routen anlegt) eingestellt.
 
 ## Entwickeln
 
@@ -50,7 +52,7 @@ node tools/serve.cjs dist  # http://localhost:8080
 
 | Ordner | Inhalt |
 |---|---|
-| `src/` | Spielcode (Three.js): `world.js` 3D-Diorama, `main.js` Spielablauf/Steuerung, `ui.js` bildbasierte Oberfläche, `economy.js` Produktionswirtschaft, `levels.js`/`plots.js` Level und Bauplätze, `audio.js` Musik und erzeugte Klänge |
+| `src/` | Spielcode (Three.js): `world.js` 3D-Diorama, `main.js` Spielablauf/Steuerung, `ui.js` bildbasierte Oberfläche, `economy.js` Produktionswirtschaft mit Routen und Fahrzeugen, `routes.js` Wegegeometrie, `levels.js`/`plots.js` Level und Bauplätze, `audio.js` Musik und erzeugte Klänge |
 | `public/assets/` | aufbereitete Assets (WebP/JPG, meshopt-komprimierte GLBs, MP3) |
 | `tools/` | Bild-/Modell-Aufbereitung, Build, lokaler Server, Balancing-Simulation |
 | `art/jobs.json` | Higgsfield/Meshy-Job-IDs der Rohdateien |
