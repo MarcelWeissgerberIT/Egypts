@@ -55,5 +55,6 @@ node tools/serve.cjs dist  # http://localhost:8080
 | `tools/` | Bild-/Modell-Aufbereitung, Build, lokaler Server, Balancing-Simulation |
 | `art/jobs.json` | Higgsfield/Meshy-Job-IDs der Rohdateien |
 
-`npm run deploy` baut das Spiel und veröffentlicht `dist/` auf dem Branch `gh-pages`
-(GitHub Pages: Settings → Pages → „Deploy from a branch“, Branch `gh-pages`, Ordner `/ (root)`).
+Jeder Push auf `claude/purpursonne-pyramide` (oder `main`) baut das Spiel per GitHub Actions
+(`.github/workflows/pages.yml`) und veröffentlicht es auf GitHub Pages
+(Settings → Pages → Source: „GitHub Actions“).
