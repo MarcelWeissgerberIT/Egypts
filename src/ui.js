@@ -68,10 +68,25 @@ export class UI {
     // ---------------- bottom controls
     this.controls = el('div', { id: 'controls', class: 'hidden' });
     this.btnSpeed = el('div', { id: 'btnSpeed', class: 'btn', role: 'button' }, `<img src="${U('btn_next')}"><div class="spd digits"></div>`);
+    this.btnRoad = el('div', { id: 'btnRoad', class: 'btn', role: 'button' }, `<img src="${U('btn_road')}">`);
     this.eventIcon = el('div', { id: 'eventIcon' });
-    this.controls.append(this.eventIcon, this.btnSpeed);
+    this.controls.append(this.btnRoad, this.eventIcon, this.btnSpeed);
     app.append(this.controls);
     this._bindTap(this.btnSpeed, 'speed');
+    this._bindTap(this.btnRoad, 'roadMode');
+
+    // ---------------- road building bar
+    this.roadBar = el('div', { id: 'roadBar', class: 'hidden' });
+    const tool = (id, img, cost) => {
+      const t = el('div', { class: 'tool btn', 'data-tool': id }, `<img class="ti" src="${U(img)}">${cost ? `<div class="cost">${ico('r_deben', 16)}<div class="digits">${digitsHTML(cost, 14)}</div></div>` : ''}`);
+      this._bindTap(t, 'roadTool', id);
+      return t;
+    };
+    this.roadTools = { path: tool('path', 't_path', 1), track: tool('track', 't_track', 3), erase: tool('erase', 'btn_erase', 0) };
+    this.roadDone = button('roadDone', 'btn_close');
+    this._bindTap(this.roadDone, 'roadDone');
+    this.roadBar.append(this.roadTools.path, this.roadTools.track, this.roadTools.erase, this.roadDone);
+    app.append(this.roadBar);
 
     // ---------------- sheet (build menu / building info)
     this.sheet = el('div', { id: 'sheet', class: 'hidden' }, `<div class="sheetBody"></div>`);
@@ -81,11 +96,6 @@ export class UI {
     app.append(this.sheet);
     this._bindTap(this.sheetClose, 'closeSheet');
 
-    this.routeBar = el('div', { id: 'routeBar', class: 'hidden' }, `<div class="rb"></div>`);
-    this.routeCancel = button('routeCancel', 'btn_close');
-    this.routeBar.append(this.routeCancel);
-    app.append(this.routeBar);
-    this._bindTap(this.routeCancel, 'routeCancel');
 
     this.fx = el('div', { id: 'fx' });
     this.flashEl = el('div', { id: 'flash' });
@@ -246,21 +256,17 @@ export class UI {
         <div class="cost${info.money ? '' : ' short'}">${ico('r_deben', 18)}<div class="digits">${digitsHTML(info.upCost, 14)}</div></div>
         ${info.upStaff ? `<div class="cost${info.hands ? '' : ' short'}">${ico('r_worker', 18)}<div class="digits">${digitsHTML(info.upStaff, 14, 'plus')}</div></div>` : ''}</div>`;
     } else up = `<div class="maxed">${ico('icon_eye', 40)}</div>`;
-    const routeBtn = info.canRoute ? `<div class="routeBtn btn" id="btnRoute">${ico('btn_route', 52)}</div>` : '';
-    const routes = (info.routes || []).map((r) => `<div class="routeRow">
-        ${ico('t_' + r.ttype, 34)}${ico('r_' + r.good, 22)}${arrow}${ico(r.to === 'site' ? 'icon_pyramid' : 'b_' + r.to, 34)}
-        <div class="digits">${digitsHTML(r.vehicles, 16, 'x')}</div>
-        <div class="btn mini${r.canAdd ? '' : ' off'}" data-add="${r.id}">${ico('btn_add', 34)}</div>
-        <div class="btn mini" data-del="${r.id}">${ico('btn_close', 30)}</div></div>`).join('');
+    const carriers = info.carrier ? `<div class="carriers">${ico('t_' + info.carrier, 40)}<div class="digits">${digitsHTML(info.carriers, 18, 'x')}</div>
+        ${info.road ? `<div class="road${info.linked ? '' : ' bad'}">${ico('t_' + info.road, 34)}${info.linked ? '' : ico('d_x', 18, 'nox')}</div>` : ''}
+        ${info.carriers < 3 ? `<div class="btn mini${info.canAdd ? '' : ' off'}" id="btnCarrier">${ico('btn_add', 36)}</div>
+        <div class="cost${info.addMoney ? '' : ' short'}">${ico('r_deben', 16)}<div class="digits">${digitsHTML(info.addCost, 13)}</div></div>
+        <div class="cost${info.addHands ? '' : ' short'}">${ico('r_worker', 16)}<div class="digits">${digitsHTML(1, 13)}</div></div>` : ''}</div>` : '';
     this.sheetBody.innerHTML = `<div class="binfo"><div class="bleft"><img class="bimg big" src="${U('b_' + info.type)}">${status}</div>
-      <div class="bright"><div class="pips">${pips}</div><div class="recipe big">${recipe}</div>${stock}<div class="actions">${up}${routeBtn}</div></div></div>
-      ${routes ? `<div class="routes">${routes}</div>` : ''}`;
+      <div class="bright"><div class="pips">${pips}</div><div class="recipe big">${recipe}</div>${stock}<div class="actions">${up}</div></div></div>${carriers}`;
     const ub = this.sheetBody.querySelector('#btnUpgrade');
     if (ub) this._bindTap(ub, 'upgrade');
-    const rb = this.sheetBody.querySelector('#btnRoute');
-    if (rb) this._bindTap(rb, 'route');
-    this.sheetBody.querySelectorAll('[data-add]').forEach((e) => this._bindTap(e, 'addVehicle', +e.getAttribute('data-add')));
-    this.sheetBody.querySelectorAll('[data-del]').forEach((e) => this._bindTap(e, 'delRoute', +e.getAttribute('data-del')));
+    const cb = this.sheetBody.querySelector('#btnCarrier');
+    if (cb) this._bindTap(cb, 'addCarrier');
     this.sheet.classList.remove('hidden');
     this.controls.classList.add('under');
     this.sheetOpen = 'building';
@@ -286,33 +292,17 @@ export class UI {
     this.sheetOpen = 'site';
   }
 
-  openTransportSheet(opts) {
-    let h = '<div class="cards">';
-    for (const o of opts) {
-      h += `<div class="card btn${o.ok ? '' : ' off'}" data-t="${o.type}">
-        <img class="bimg" src="${U('t_' + o.type)}">
-        <div class="cost">${ico('r_' + o.good, 18)}<div class="digits">${digitsHTML(o.cap, 15, 'x')}</div></div>
-        <div class="cost">${ico('icon_speed', 18)}<div class="digits">${digitsHTML(o.speed, 15)}</div></div>
-        <div class="cost${o.money ? '' : ' short'}">${ico('r_deben', 18)}<div class="digits">${digitsHTML(o.cost, 15)}</div></div>
-        <div class="cost${o.hands ? '' : ' short'}">${ico('r_worker', 18)}<div class="digits">${digitsHTML(o.staff, 15)}</div></div>
-      </div>`;
-    }
-    this.sheetBody.innerHTML = h + '</div>';
-    this.sheetBody.querySelectorAll('.card').forEach((c) => this._bindTap(c, 'pickTransport', c.getAttribute('data-t')));
-    this.sheet.classList.remove('hidden');
+  showRoadBar(tool) {
+    this.roadBar.classList.remove('hidden');
     this.controls.classList.add('under');
-    this.sheetOpen = 'transport';
+    for (const [k, t] of Object.entries(this.roadTools)) t.classList.toggle('sel', k === tool);
   }
-
-  showRouteBar(fromType, good) {
-    this.routeBar.querySelector('.rb').innerHTML = `${ico(fromType === 'site' ? 'icon_pyramid' : 'b_' + fromType, 46)}${ico('r_' + good, 30)}${arrow}${ico('icon_target', 40, 'pulse')}`;
-    this.routeBar.classList.remove('hidden');
-  }
-  hideRouteBar() { this.routeBar.classList.add('hidden'); }
+  hideRoadBar() { this.roadBar.classList.add('hidden'); if (!this.sheetOpen) this.controls.classList.remove('under'); }
+  flashRoadCost(tool) { const t = this.roadTools[tool]; if (!t) return; t.classList.remove('shake'); void t.offsetWidth; t.classList.add('shake'); }
 
   closeSheet() { this.sheet.classList.add('hidden'); this.controls.classList.remove('under'); this.sheetOpen = null; }
   shakeCard(type) {
-    const c = this.sheetBody.querySelector(`[data-type="${type}"]`) || this.sheetBody.querySelector(`[data-t="${type}"]`) || this.sheetBody.querySelector('#btnUpgrade');
+    const c = this.sheetBody.querySelector(`[data-type="${type}"]`) || this.sheetBody.querySelector(type === 'carrier' ? '#btnCarrier' : '#btnUpgrade');
     if (!c) return; c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
   }
 

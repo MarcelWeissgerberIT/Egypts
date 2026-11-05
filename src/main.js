@@ -5,10 +5,11 @@ import { World, uv } from './world.js';
 import { UI } from './ui.js';
 import { Audio } from './audio.js';
 import { LEVELS, tierSizes } from './levels.js';
-import { PLOTS } from './plots.js';
-import { Economy, DEFS, MAX_LEVEL, upgradeCost, staffFor, cycleOf, PAY, TIER_PAY, TRANSPORT, SITE_PLACE, SITE_UP, OUT_CAP } from './economy.js';
+import { PLOTS } from './map.js';
+import { Economy, DEFS, MAX_LEVEL, upgradeCost, staffFor, cycleOf, PAY, TIER_PAY, SITE_PLACE, SITE_UP, OUT_CAP, HEAVY, goodOf, PATH, TRACK } from './economy.js';
 
 const SAVE_KEY = 'purple-sun-works-v2';
+const TOOL_TYPE = { path: PATH, track: TRACK };
 const BUILDINGS = ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy', 'granite', 'quay'];
 const LP_CLIPS = ['walk', 'carry', 'hammer', 'chop', 'reap', 'pick', 'place', 'push', 'lever', 'water', 'cheer', 'talk', 'shrug'];
 
@@ -28,7 +29,7 @@ async function loadAssets(onProgress) {
   const models = ['worker', 'worker_lp', 'pharaoh', 'priestess', 'sphinx', 'obelisk', 'palm', 'camel', 'sledge', 'temple', 'anubis', 'boat', 'brazier', 'oxcart',
     'anim_worker_walk', 'anim_worker_cheer', 'anim_worker_idle', 'anim_pharaoh_cheer', 'anim_pharaoh_stomp', 'anim_priestess_cast', 'anim_priestess_dance',
     ...LP_CLIPS.map((c) => 'anim_lp_' + c), ...BUILDINGS];
-  const uiImgs = ['btn_play', 'btn_pause', 'btn_restart', 'btn_next', 'btn_home', 'btn_sound_on', 'btn_sound_off', 'btn_shuffle', 'btn_up', 'btn_close', 'btn_route', 'btn_add',
+  const uiImgs = ['btn_play', 'btn_pause', 'btn_restart', 'btn_next', 'btn_home', 'btn_sound_on', 'btn_sound_off', 'btn_shuffle', 'btn_up', 'btn_close', 'btn_add', 'btn_road', 'btn_erase', 't_path', 't_track',
     'icon_scarab', 'icon_sun', 'icon_eye', 'icon_eye_empty', 'icon_lock', 'icon_pyramid', 'icon_speed', 'icon_full', 'icon_target', 'hand', 'panel', 'banner_win', 'banner_lose',
     'medallion', 'plaque', 'plot', 'bubble', 't_porter', 't_sledge', 't_ox', 't_boat',
     'r_deben', 'r_worker', 'r_grain', 'r_bread', 'r_stone', 'r_block', 'r_tools', 'r_ore', 'r_granite', ...BUILDINGS.map((b) => 'b_' + b),
@@ -58,6 +59,7 @@ async function loadAssets(onProgress) {
 
 const statusKey = (b) => {
   if (!b.built) return null;
+  if (b.carriers && b.carriers.length && !b.linked) return HEAVY.has(goodOf(b.type)) && !DEFS[b.type].boat ? 't_track' : 't_path';
   if (b.state === 'missing') return 'r_' + b.missing;
   if (b.state === 'full') return 'icon_full';
   if (b.state === 'noTools') return 'r_tools';
@@ -118,14 +120,13 @@ class Game {
     ui.on('restart', () => { click(); this.startLevel(this.levelIndex); });
     ui.on('next', () => { click(); if (this.levelIndex + 1 < LEVELS.length) this.startLevel(this.levelIndex + 1); else this.openLevels(); });
     ui.on('speed', () => { click(); this.speed = this.speed >= 3 ? 1 : this.speed + 1; ui.setSpeed(this.speed); });
-    ui.on('closeSheet', () => { click(); this._closeSheet(); this._endRouteMode(); });
+    ui.on('closeSheet', () => { click(); this._closeSheet(); });
     ui.on('buildType', (type) => this.build(type));
     ui.on('upgrade', () => this.upgrade());
-    ui.on('route', () => this._startRouteMode());
-    ui.on('routeCancel', () => { click(); this._endRouteMode(); this._closeSheet(); });
-    ui.on('pickTransport', (t) => this._createRoute(t));
-    ui.on('addVehicle', (id) => this._addVehicle(id));
-    ui.on('delRoute', (id) => this._delRoute(id));
+    ui.on('roadMode', () => { click(); if (this.roadMode) this._endRoadMode(); else this._startRoadMode(); });
+    ui.on('roadTool', (t) => { click(); if (this.roadMode) { this.roadMode.tool = t; this.ui.showRoadBar(t); } });
+    ui.on('roadDone', () => { click(); this._endRoadMode(); });
+    ui.on('addCarrier', () => this._addCarrier());
 
     const c = document.getElementById('gl');
     c.addEventListener('pointerdown', (e) => this._pdown(e));
@@ -139,7 +140,7 @@ class Game {
     this.state = 'menu';
     this.world.setOrbit(false);
     this.ui.setInGame(false);
-    this.ui.hideRouteBar();
+    this.ui.hideRoadBar();
     this.ui.buildLevels(LEVELS, this.save);
     this.ui.show('scrLevels');
     this.ui.hideHand();
@@ -171,12 +172,11 @@ class Game {
     this.world.setDaylight(0);
     this.speed = 1;
     this.selected = null;
-    this.routeMode = null;
-    this.pendingRoute = null;
+    this.roadMode = null;
     this.warned = {};
     this.ui.show(null);
     this.ui.setInGame(true);
-    this.ui.hideRouteBar();
+    this.ui.hideRoadBar();
     this.ui.setLevel(i);
     this.ui.setSpeed(1);
     this.ui.setEvent(null);
@@ -194,7 +194,7 @@ class Game {
 
   _refreshMarkers() {
     const terrains = [...new Set(this.L.allowed.map((t) => DEFS[t].terrain))];
-    this.world.setPlotMarkers(this.routeMode ? [] : terrains, (id) => this.eco.plotFree(id), this.advice?.plot || null);
+    this.world.setPlotMarkers(this.roadMode ? [] : terrains, (id) => this.eco.plotFree(id), this.advice?.plot || null);
   }
 
   // ------------------------------------------------------------ economy events -> visuals
@@ -209,8 +209,9 @@ class Game {
         case 'upgraded':
           if (e.b.type === 'site') this.audio.tier(); else { this.world.upgradeBuilding(e.b); this.audio.ankh(); }
           break;
-        case 'route': this.world.addRoute(e.r); this.audio.shuffle(); break;
-        case 'unroute': this.world.removeRoute(e.r); break;
+        case 'deliver':
+          if (e.to.type === 'site' && this.state === 'play' && Math.random() < 0.5) this.audio.tick(false);
+          break;
         case 'made': this.world.popIcon(e.b, 'r_' + e.good); break;
         case 'placed': {
           const p = this.world.placeBlock(e.index, e.good);
@@ -278,8 +279,9 @@ class Game {
     const types = this.L.allowed.filter((t) => DEFS[t].terrain === plot.terrain);
     const cards = types.map((type) => {
       const d = DEFS[type];
-      const money = this.eco.deben >= d.cost, hands = this.eco.workersFree() >= d.staff;
-      return { type, cost: d.cost, staff: d.staff, inputs: (d.in || []).map(([g]) => g), output: d.out ? d.out[0] : null, money, hands, ok: money && hands };
+      const staff = this.eco.staffNeeded(type);
+      const money = this.eco.deben >= d.cost, hands = this.eco.workersFree() >= staff;
+      return { type, cost: d.cost, staff, inputs: (d.in || []).map(([g]) => g), output: d.out ? d.out[0] : null, money, hands, ok: money && hands };
     });
     const key = JSON.stringify(cards);
     if (key !== this._sheetKey) { this._sheetKey = key; this.ui.openBuildSheet(cards); }
@@ -300,11 +302,9 @@ class Game {
       status: statusKey(b),
       upCost, upStaff: Math.max(0, extra),
       money: E.deben >= upCost, hands: E.workersFree() >= extra, canUpgrade: E.canUpgrade(b),
-      canRoute: !!out && b.built && E.routes.filter((r) => r.from === b.id).length < 3,
-      routes: E.routes.filter((r) => r.from === b.id).map((r) => {
-        const to = E.node(r.to);
-        return { id: r.id, ttype: r.type, good: r.good, to: to ? to.type : 'site', vehicles: r.vehicles.length, canAdd: E.canAddVehicle(r) };
-      }),
+      carrier: out ? E.carrierKind(b) : null, carriers: b.carriers.length,
+      road: out && !d.boat ? (HEAVY.has(out) ? 'track' : 'path') : null, linked: !!b.linked,
+      canAdd: E.canAddCarrier(b), addCost: out ? E.carrierCost(b) : 0, addMoney: out ? E.deben >= E.carrierCost(b) : false, addHands: E.workersFree() >= 1,
     };
   }
 
@@ -358,81 +358,75 @@ class Game {
     this._updateHud();
   }
 
-  // ------------------------------------------------------------ routes
-  _nodePos(id) {
-    if (id === 'site') return { pos: this.world.dockPos.clone(), height: 1.2 };
-    const b = this.eco.node(id);
-    const v = this.world.bviews.get(b.id);
-    return { pos: v.pos.clone(), height: v.model.userData.height };
-  }
-
-  _startRouteMode() {
-    if (!this.selected?.building) return;
-    const from = this.eco.node(this.selected.building);
-    const good = this.eco.produces(from);
-    const targets = this.eco.validTargets(from.id);
+  // ------------------------------------------------------------ roads
+  _startRoadMode(tool = null) {
+    if (this.state !== 'play') return;
     this._closeSheet();
-    this.routeMode = { from: from.id, good, targets };
-    this.ui.showRouteBar(from.type, good);
-    this.world.setTargets([{ ...this._nodePos(from.id), source: true }, ...targets.map((id) => this._nodePos(id))]);
-    this._refreshMarkers();
-    this.audio.button();
-    if (!targets.length) { this.audio.invalid(); this.ui.shakeHud(); }
-  }
-
-  _endRouteMode() {
-    if (!this.routeMode && !this.pendingRoute) return;
-    this.routeMode = null; this.pendingRoute = null;
-    this.ui.hideRouteBar();
-    this.world.setTargets(null);
+    const t = tool || this.roadMode?.tool || this._lastTool || 'track';
+    this.roadMode = { tool: t };
+    this.ui.showRoadBar(t);
+    this.world.showGrid(true, this.eco);
     this._refreshMarkers();
   }
-
-  _routeTap(hit) {
-    const RM = this.routeMode;
-    let id = null;
-    if (hit?.site) id = 'site';
-    else if (hit?.plot) { const b = this.eco.buildings.find((x) => x.plot === hit.plot); if (b) id = b.id; }
-    if (id === null || !RM.targets.includes(id)) { this.audio.invalid(); return; }
-    const opt = this.eco.routeOptions(RM.from, id);
-    if (!opt) { this.audio.invalid(); return; }
-    this.pendingRoute = { from: RM.from, to: id };
-    this.ui.openTransportSheet(opt.types.map((t) => {
-      const T = TRANSPORT[t.type];
-      return { type: t.type, good: opt.good, cap: T.cap, speed: Math.max(1, Math.round(T.speed)), cost: T.cost, staff: T.staff, money: t.money, hands: t.hands, ok: t.money && t.hands };
-    }));
-    this.audio.button();
+  _endRoadMode() {
+    if (!this.roadMode) return;
+    this._lastTool = this.roadMode.tool;
+    this.roadMode = null;
+    this.paint = null;
+    this.ui.hideRoadBar();
+    this.world.showGrid(false);
+    this._refreshMarkers();
   }
 
-  _createRoute(type) {
-    const P = this.pendingRoute;
-    if (!P) return;
-    const r = this.eco.addRoute(P.from, P.to, type);
-    if (!r) { this.audio.invalid(); this.ui.shakeCard(type); return; }
+  // paint (or erase) the tiles between the last painted tile and the one under the finger
+  _paintTo(x, y) {
+    const t = this.world.pickTile(x, y);
+    if (!t) return;
+    const P = this.paint;
+    const steps = [];
+    if (!P.last) steps.push(t);
+    else {
+      let cx = P.last.x, cz = P.last.z;
+      while (cx !== t.x || cz !== t.z) {
+        // 4-connected walk: move along the axis with the larger remaining distance
+        if (Math.abs(t.x - cx) >= Math.abs(t.z - cz)) cx += Math.sign(t.x - cx); else cz += Math.sign(t.z - cz);
+        steps.push({ x: cx, z: cz });
+        if (steps.length > 40) break;
+      }
+    }
+    for (const q of steps) this._paintTile(q.x, q.z);
+    P.last = t;
+  }
+
+  _paintTile(x, z) {
+    const E = this.eco, tool = this.roadMode.tool;
+    if (tool === 'erase') {
+      if (E.eraseRoad(x, z)) { this.world.roadFx(x, z, 'erase'); this._sfx('erase'); }
+      return;
+    }
+    const r = E.placeRoad(x, z, TOOL_TYPE[tool]);
+    if (r > 0) { this.world.roadFx(x, z, tool); this._sfx('road'); this.paint.spent += r; }
+    else if (r === -1) this.world.roadFx(x, z, 'bad');
+    else if (r === -2) { this.world.roadFx(x, z, 'bad'); this._sfx('poor'); this.ui.flashRoadCost(tool); this.ui.shakeHud(); }
+  }
+
+  _sfx(kind) {
+    const now = performance.now();
+    this._sfxT = this._sfxT || {};
+    if (now - (this._sfxT[kind] || 0) < (kind === 'poor' ? 600 : 70)) return;
+    this._sfxT[kind] = now;
+    if (kind === 'road') this.audio.place(true);
+    else if (kind === 'erase') this.audio.shuffle();
+    else this.audio.invalid();
+  }
+
+  _addCarrier() {
+    const b = this.selected?.building && this.eco.buildings.find((x) => x.id === this.selected.building);
+    if (!b || !this.eco.addCarrier(b)) { this.audio.invalid(); this.ui.shakeCard('carrier'); return; }
     this._handleEvents(this.eco.drain());
-    const from = P.from;
-    this._endRouteMode();
-    this.ui.closeSheet();
-    this.selected = { building: from };
+    this.audio.button();
     this._sheetKey = null;
-    this._showBuilding(this.eco.node(from));
-    this._updateHud();
-  }
-
-  _addVehicle(id) {
-    const r = this.eco.routes.find((x) => x.id === id);
-    if (!r || !this.eco.addVehicle(r)) { this.audio.invalid(); return; }
-    this._handleEvents(this.eco.drain());
-    this.audio.button();
-    this._updateHud();
-  }
-
-  _delRoute(id) {
-    const r = this.eco.routes.find((x) => x.id === id);
-    if (!r) return;
-    this.eco.removeRoute(r);
-    this._handleEvents(this.eco.drain());
-    this.audio.button();
+    this._showBuilding(b);
     this._updateHud();
   }
 
@@ -442,7 +436,15 @@ class Game {
     this.audio.unlock();
     try { e.target.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false });
-    if (this.pointers.size === 2) { const [a, b] = [...this.pointers.values()]; this.pinch = Math.hypot(a.x - b.x, a.y - b.y); a.moved = b.moved = true; }
+    if (this.pointers.size === 2) {
+      const [a, b] = [...this.pointers.values()];
+      this.pinch = Math.hypot(a.x - b.x, a.y - b.y); this.mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      a.moved = b.moved = true;
+      this.paint = null;
+    } else if (this.roadMode && this.pointers.size === 1) {
+      this.paint = { last: null, spent: 0 };
+      this._paintTo(e.clientX, e.clientY);
+    }
   }
 
   _pmove(e) {
@@ -451,11 +453,16 @@ class Game {
     if (this.pointers.size >= 2) {
       p.x = e.clientX; p.y = e.clientY;
       const [a, b] = [...this.pointers.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const d = Math.hypot(a.x - b.x, a.y - b.y), mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       if (this.pinch && d > 10) this.world.zoom(this.pinch / d);
-      this.pinch = d;
+      if (this.mid) {
+        const m0 = this.world.screenToPlane(this.mid.x, this.mid.y, 0), m1 = this.world.screenToPlane(mid.x, mid.y, 0);
+        if (m0 && m1) this.world.pan(m0.x - m1.x, m0.z - m1.z);
+      }
+      this.pinch = d; this.mid = mid;
       return;
     }
+    if (this.paint) { this._paintTo(e.clientX, e.clientY); p.x = e.clientX; p.y = e.clientY; p.moved = true; return; }
     if (!p.moved && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 8) p.moved = true;
     if (p.moved) {
       const a = this.world.screenToPlane(p.x, p.y, 0), b = this.world.screenToPlane(e.clientX, e.clientY, 0);
@@ -467,11 +474,19 @@ class Game {
   _pup(e) {
     const p = this.pointers.get(e.pointerId);
     this.pointers.delete(e.pointerId);
-    if (this.pointers.size < 2) this.pinch = null;
-    if (!p || p.moved || this.state !== 'play') return;
+    if (this.pointers.size < 2) { this.pinch = null; this.mid = null; }
+    if (this.paint && this.pointers.size === 0) {
+      const spent = this.paint.spent;
+      this.paint = null;
+      if (spent > 0) {
+        this.ui.popup(e.clientX, e.clientY - 40, spent, { icon: 'r_deben', size: 18, prefix: 'x' });
+        this._updateHud();
+      }
+      return;
+    }
+    if (!p || p.moved || this.state !== 'play' || this.roadMode) return;
     if (performance.now() - p.t0 > 600) return;
     const hit = this._pick(e.clientX, e.clientY);
-    if (this.routeMode) { this._routeTap(hit); return; }
     if (hit?.site) this._openSite();
     else if (hit?.plot) this._openPlot(hit.plot);
     else if (this.selected) this._closeSheet();
@@ -481,7 +496,7 @@ class Game {
   async levelComplete() {
     this.state = 'finale';
     this._closeSheet();
-    this._endRouteMode();
+    this._endRoadMode();
     this.ui.hideHand();
     this.ui.controls.classList.add('hidden');
     this.audio.capstone();
@@ -513,7 +528,7 @@ class Game {
   lose() {
     this.state = 'lost';
     this._closeSheet();
-    this._endRouteMode();
+    this._endRoadMode();
     this.ui.hideHand();
     this.audio.loseLife();
     this.world.pharaohStomp();
@@ -547,47 +562,74 @@ class Game {
     else if (this.selected?.building) { const b = E.buildings.find((x) => x.id === this.selected.building); if (b) this._showBuilding(b); }
   }
 
-  // first-level guide: points at the next step (route, build, card or button)
+  // first-level guide: points at the next step (deposit, building card, road tool, road to paint)
   _advisorStep() {
     const E = this.eco;
-    const byType = (t) => E.buildings.find((b) => b.type === t && b.built);
-    const hasRoute = (ft, tt) => E.routes.some((r) => E.node(r.from)?.type === ft && (tt === 'site' ? r.to === 'site' : E.node(r.to)?.type === tt));
-    const freePlot = (terrain) => PLOTS.find((p) => p.terrain === terrain && E.plotFree(p.id));
+    const any = (t) => E.buildings.find((b) => b.type === t);
+    const built = (t) => E.buildings.find((b) => b.type === t && b.built);
+    const linked = (ft, tt) => { const f = built(ft); return !!f && E.reachable(f).some((x) => (tt === 'site' ? x.n.type === 'site' : x.n.type === tt)); };
+    // free plot of a terrain closest to some anchor nodes (sum of distances)
+    const plotFor = (terrain, ...ns) => {
+      const d = (p) => ns.filter(Boolean).reduce((s, n) => s + Math.hypot(p.x - n.x, p.z - n.z), 0);
+      return PLOTS.filter((p) => p.terrain === terrain && E.plotFree(p.id)).sort((a, c) => d(a) - d(c))[0]?.id;
+    };
     let goal = null;
-    if (!hasRoute('quarry', 'mason')) goal = { route: ['quarry', 'mason', 'sledge'] };
-    else if (!hasRoute('mason', 'site')) goal = { route: ['mason', 'site', 'sledge'] };
-    else if (E.workersFree() < 1 && E.buildings.filter((b) => b.type === 'house').length < 2) goal = { build: 'house', plot: freePlot('desert')?.id };
-    else if (!E.buildings.some((b) => b.type === 'farm')) goal = { build: 'farm', plot: freePlot('fertile')?.id };
-    else if (!E.buildings.some((b) => b.type === 'bakery')) goal = { build: 'bakery', plot: freePlot('desert')?.id };
-    else if (byType('farm') && byType('bakery') && !hasRoute('farm', 'bakery')) goal = { route: ['farm', 'bakery', 'porter'] };
-    else if (byType('bakery') && !hasRoute('bakery', 'house')) goal = { route: ['bakery', 'house', 'porter'] };
-    else if (byType('farm') && byType('bakery')) { this.advisor = null; this.advice = null; this.save.tut = true; writeSave(this.save); this.ui.hideHand(); this._refreshMarkers(); return; }
-    if (!goal) { this.ui.hideHand(); return; }
+    if (!any('quarry')) goal = { build: 'quarry', plot: plotFor('limestone', E.site) };
+    else if (!any('mason')) goal = { build: 'mason', plot: plotFor('desert', any('quarry'), E.site) };
+    else if (!linked('quarry', 'mason')) goal = built('quarry') && built('mason') ? { road: ['quarry', 'mason', 'track'] } : { wait: true };
+    else if (!linked('mason', 'site')) goal = { road: ['mason', 'site', 'track'] };
+    else if (E.workersFree() < 2 && E.buildings.filter((b) => b.type === 'house').length < 2) goal = { build: 'house', plot: plotFor('desert', any('house') || E.site) };
+    else if (!any('farm')) goal = { build: 'farm', plot: plotFor('fertile', E.site) };
+    else if (!any('bakery')) goal = { build: 'bakery', plot: plotFor('desert', any('farm'), any('house')) };
+    else if (!linked('farm', 'bakery')) goal = built('farm') && built('bakery') ? { road: ['farm', 'bakery', 'path'] } : { wait: true };
+    else if (!linked('bakery', 'house')) goal = { road: ['bakery', 'house', 'path'] };
+    else { this.advisor = null; this.advice = null; this.save.tut = true; writeSave(this.save); this.ui.hideHand(); this.world.setGhost(null); this._refreshMarkers(); return; }
     const domAt = (sel) => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height * 0.6 } : null; };
-    const nodeAt = (id) => { const n = this._nodePos(id); return this.world.worldToScreen(n.pos.clone().setY(0.4)); };
+    const tileAt = (i) => this.world.worldToScreen(new THREE.Vector3(Math.floor(i / 35) - 17, 0.05, (i % 35) - 17));
     let at = null, icon = null, world = false;
-    if (goal.route) {
-      const [ft, tt, mode] = goal.route;
-      const from = byType(ft), to = tt === 'site' ? { id: 'site' } : byType(tt);
+    if (!goal.road) { if (this.advisor.ghostKey) { this.advisor.ghostKey = null; this.world.setGhost(null); } }
+    if (goal.wait) { this.ui.hideHand(); return; }
+    if (goal.road) {
+      const [ft, tt, tool] = goal.road;
+      const from = built(ft), to = tt === 'site' ? E.site : built(tt);
       if (!from || !to) { this.ui.hideHand(); return; }
-      icon = 't_' + mode;
-      if (this.pendingRoute) at = domAt(`[data-t="${mode}"]`);
-      else if (this.routeMode && this.routeMode.from === from.id) { at = nodeAt(to.id); world = true; }
-      else if (this.selected?.building === from.id) at = domAt('#btnRoute');
-      else { at = nodeAt(from.id); world = true; }
+      const key = `${from.id}>${to.id}:${tool}:${E.topo}`;
+      if (this.advisor.ghostKey !== key) {
+        this.advisor.ghostKey = key;
+        this.advisor.ghost = E.suggestRoad(from.id, to.id, TOOL_TYPE[tool]) || [];
+        this.world.setGhost(this.advisor.ghost);
+      }
+      icon = 't_' + tool;
+      const g = this.advisor.ghost;
+      if (this.ui.sheetOpen) { this._closeSheet(); return; }
+      if (!this.roadMode) at = domAt('#btnRoad');
+      else if (this.roadMode.tool !== tool) at = domAt(`[data-tool="${tool}"]`);
+      else if (g.length) {
+        // the finger traces the suggested road, tile by tile
+        const k = Math.floor(performance.now() / 260) % (g.length + 3);
+        at = tileAt(g[Math.min(k, g.length - 1)]);
+        icon = null; world = true;
+        if (this.paint) { this.ui.hideHand(); return; }
+      }
       if (this.advice) { this.advice = null; this._refreshMarkers(); }
     } else {
       icon = 'b_' + goal.build;
       if (!goal.plot) { this.ui.hideHand(); return; }
-      if (this.selected?.plot === goal.plot) at = domAt(`[data-type="${goal.build}"]`);
+      if (this.roadMode) at = domAt('#roadDone');
+      else if (this.selected?.plot === goal.plot) at = domAt(`[data-type="${goal.build}"]`);
       else { at = this.world.worldToScreen(this.world.plotViews[goal.plot].pos.clone().setY(0.4)); world = true; }
       if (!this.advice || this.advice.plot !== goal.plot) { this.advice = { plot: goal.plot }; this._refreshMarkers(); }
     }
     if (!at) { this.ui.hideHand(); return; }
+    // a world target off screen: bring it into view first
+    if (world && (at.x < 36 || at.x > this.vw - 36 || at.y < this.freeTop + 20 || at.y > this.freeBottom - 50)) {
+      const tgt = goal.road ? (() => { const i = this.advisor.ghost[Math.floor(this.advisor.ghost.length / 2)]; return { x: Math.floor(i / 35) - 17, z: (i % 35) - 17 }; })() : this.world.plotViews[goal.plot].pos;
+      this.world.focusOn(tgt);
+    }
     // a target hidden behind an open panel: close the panel so the next step can be tapped
     const sheet = document.getElementById('sheet');
     if (world && this.ui.sheetOpen && at.y > sheet.getBoundingClientRect().top - 8) { this._closeSheet(); return; }
-    const bob = Math.abs(Math.sin(performance.now() / 260)) * 12;
+    const bob = icon ? Math.abs(Math.sin(performance.now() / 260)) * 12 : 0;
     this.ui.handAt(at.x, at.y + 8 + bob, icon);
   }
 
@@ -612,7 +654,9 @@ class Game {
       else if (this.eco.time >= this.L.deadline) this.lose();
     }
     if (!menu && this.eco) {
-      this.world.syncVehicles(this.eco);
+      this.world.tempo = Math.max(0.4, this.eco.productivity());
+      this.world.syncRoads(this.eco);
+      this.world.syncCarriers(this.eco, gdt);
       const S = this.eco.site, good = this.eco.currentGood();
       this.world.updateSite({ working: S.state === 'work' && this.eco.placed < this.eco.total, frac: S.placeT / SITE_PLACE[S.level - 1], stock: S.inv, good }, gdt);
     }

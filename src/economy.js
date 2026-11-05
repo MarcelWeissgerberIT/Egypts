@@ -1,51 +1,55 @@
 // Production economy for the pyramid works. Pure logic, stepped with step(dt).
-// Every building has its own small stores; goods only move along routes the player creates
-// (porters, sledge teams, ox carts, Nile boats). The construction site turns delivered blocks
-// (and granite for the top tiers) into the pyramid.
-import { landPath, riverPath, pathLength, crossesRiver, siteDock, pyramidRadius } from './routes.js';
+// Buildings sit on plots; quarries, mines, farms and the granite quarry only on their deposits.
+// Goods leave a building only along roads the player paints tile by tile: footpaths for light
+// goods, sledge tracks for stone, blocks and granite. Every producer has its own carriers who
+// take the goods to the nearest connected consumer with room; granite crosses the Nile by boat.
+import { RoadGrid, PATH, TRACK, ROAD_COST, tilePolyline, polyLength, riverPolyline } from './roads.js';
 
 export const GOODS = ['grain', 'bread', 'stone', 'block', 'ore', 'tools', 'granite'];
 export const HEAVY = new Set(['stone', 'block', 'granite']);
 
 export const DEFS = {
-  house:   { terrain: 'desert',  cost: 30, staff: 0, workers: [6, 9, 12], eat: 22 },
-  farm:    { terrain: 'fertile', cost: 25, staff: 1, out: ['grain', 1], cycle: 7 },
-  bakery:  { terrain: 'desert',  cost: 45, staff: 1, in: [['grain', 1]], out: ['bread', 2], cycle: 6 },
-  quarry:  { terrain: 'rock',    cost: 35, staff: 2, out: ['stone', 1], cycle: 5, usesTools: true },
-  mason:   { terrain: 'desert',  cost: 50, staff: 2, in: [['stone', 1]], out: ['block', 1], cycle: 5 },
-  mine:    { terrain: 'rock',    cost: 45, staff: 2, out: ['ore', 1], cycle: 9 },
-  smithy:  { terrain: 'desert',  cost: 55, staff: 2, in: [['ore', 1]], out: ['tools', 2], cycle: 8 },
-  granite: { terrain: 'farbank', cost: 60, staff: 3, out: ['granite', 1], cycle: 6, usesTools: true },
-  quay:    { terrain: 'bank',    cost: 40, staff: 1, in: [['granite', 1]], out: ['granite', 1], cycle: 0.6 },
+  house:   { terrain: 'desert',    cost: 30, staff: 0, workers: [7, 11, 15], eat: 22 },
+  farm:    { terrain: 'fertile',   cost: 25, staff: 1, out: ['grain', 1], cycle: 7 },
+  bakery:  { terrain: 'desert',    cost: 40, staff: 1, in: [['grain', 1]], out: ['bread', 2], cycle: 6 },
+  quarry:  { terrain: 'limestone', cost: 35, staff: 2, out: ['stone', 1], cycle: 5, usesTools: true },
+  mason:   { terrain: 'desert',    cost: 45, staff: 2, in: [['stone', 1]], out: ['block', 1], cycle: 5 },
+  mine:    { terrain: 'copper',    cost: 45, staff: 2, out: ['ore', 1], cycle: 9 },
+  smithy:  { terrain: 'desert',    cost: 50, staff: 2, in: [['ore', 1]], out: ['tools', 2], cycle: 8 },
+  granite: { terrain: 'granite',   cost: 60, staff: 3, out: ['granite', 1], cycle: 6, boat: true },
+  quay:    { terrain: 'bank',      cost: 40, staff: 1, in: [['granite', 1]], out: ['granite', 1], cycle: 0.6 },
 };
 export const ORDER = ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy', 'granite', 'quay'];
 
-export const TRANSPORT = {
-  porter: { cost: 0,  staff: 1, cap: 1, speed: 2.6, light: true },
-  sledge: { cost: 20, staff: 1, cap: 2, speed: 1.9 },
-  ox:     { cost: 45, staff: 1, cap: 4, speed: 2.4 },
-  boat:   { cost: 60, staff: 1, cap: 4, speed: 2.2, water: true },
+// carriers: speed in tiles per second
+export const CARRIER = {
+  porter: { cap: 1, speed: 1.9 },
+  sledge: { cap: 2, speed: 1.3 },
+  ox:     { cap: 4, speed: 1.6 },
+  boat:   { cap: 2, speed: 1.5 },
 };
-export const TRANSPORT_ORDER = ['porter', 'sledge', 'ox', 'boat'];
+export const MAX_CARRIERS = 3;
+export const CARRIER_COST = { light: 10, heavy: 20 };
+export { PATH, TRACK, ROAD_COST };
 
 export const MAX_LEVEL = 3;
-export const MAX_ROUTES = 3, MAX_VEHICLES = 3;
 const SPEED = [1, 1 / 0.7, 2];
 export const IN_CAP = 6, OUT_CAP = 6, SITE_CAP = 10;
 export const PAY = { block: 6, granite: 14 };
 export const TIER_PAY = 40;
 export const STIPEND = 0.4;
 const TOOL_EVERY = 4, NO_TOOL_SLOW = 2.5;
-const LOAD_TIME = 0.6;
+const LOAD_TIME = 0.7;
 export const SITE_PLACE = [3.0, 2.2, 1.6];      // seconds per block, by ramp crew level
 export const SITE_UP = [{ cost: 70, staff: 2 }, { cost: 130, staff: 2 }];
 
 export function upgradeCost(type, level) { return Math.round(DEFS[type].cost * (level === 1 ? 1.4 : 2.4)); }
 export function staffFor(type, level) { const d = DEFS[type]; return d.staff ? d.staff + (level - 1) : 0; }
 export function cycleOf(type, level) { return DEFS[type].cycle / SPEED[level - 1]; }
+export const goodOf = (type) => (DEFS[type].out ? DEFS[type].out[0] : null);
 
 export class Economy {
-  // level: { base, startDeben, tools, flood, storm, allowed, transports, graniteTiers }
+  // level: { base, startDeben, tools, flood, storm, allowed, ox, graniteTiers }
   constructor(level, plots, tierSizes) {
     this.L = level;
     this.plots = plots;
@@ -54,12 +58,12 @@ export class Economy {
     this.total = this.tierCells.reduce((a, b) => a + b, 0);
     const gt = level.graniteTiers || 0;
     this.tierGood = tierSizes.map((_, t) => (t >= tierSizes.length - gt ? 'granite' : 'block'));
-    this.R = pyramidRadius(level.base);
+    this.grid = new RoadGrid(level.base, plots);
     this.deben = level.startDeben;
     this.pantry = { bread: level.startBread ?? 8 };
     this.buildings = [];
-    this.routes = [];
-    this.site = { id: 'site', type: 'site', built: true, level: 1, inv: { block: 0, granite: 0 }, incoming: { block: 0, granite: 0 }, placeT: 0, pos: siteDock(level.base) };
+    const P = this.grid.plaza;
+    this.site = { id: 'site', type: 'site', built: true, level: 1, inv: { block: 0, granite: 0 }, incoming: { block: 0, granite: 0 }, placeT: 0, x: P.x, z: P.z };
     this.time = 0;
     this.placed = 0;
     this.events = [];
@@ -67,6 +71,9 @@ export class Economy {
     this.storm = { phase: 'calm', t: level.storm ? level.storm.first : Infinity };
     this.stipendAcc = 0;
     this.nextId = 1;
+    this.topo = 0;            // bumps whenever roads or buildings change
+    this._bfsCache = new Map();
+    this.roadSpent = 0;
   }
 
   emit(e) { this.events.push(e); }
@@ -74,32 +81,34 @@ export class Economy {
 
   // ------------------------------------------------------------ nodes
   node(id) { return id === 'site' ? this.site : this.buildings.find((b) => b.id === id); }
-  posOf(n) { if (n.type === 'site') return n.pos; const p = this.plots.find((q) => q.id === n.plot); return { u: p.u, v: p.v }; }
+  plotOf(id) { return this.plots.find((p) => p.id === id); }
   produces(n) { return n.type !== 'site' && DEFS[n.type].out ? DEFS[n.type].out[0] : null; }
   accepts(n, good) {
+    if (!n.built) return false;
     if (n.type === 'site') return good === 'block' || good === 'granite';
     if (n.type === 'house') return good === 'bread';
     const d = DEFS[n.type];
     if (good === 'tools' && d.usesTools && this.L.tools) return true;
     return !!(d.in && d.in.some(([g]) => g === good));
   }
-  stockOf(n, good) {
-    if (n.type === 'house') return this.pantry.bread;
-    return n.inv[good] || 0;
-  }
-  capOf(n, good) {
+  stockOf(n, good) { return n.type === 'house' ? this.pantry.bread : (n.inv[good] || 0); }
+  capOf(n) {
     if (n.type === 'site') return SITE_CAP;
     if (n.type === 'house') return 6 * this.buildings.filter((b) => b.type === 'house' && b.built).length;
     return IN_CAP;
   }
-  space(n, good) { return this.capOf(n, good) - this.stockOf(n, good) - ((n.incoming && n.incoming[good]) || 0); }
+  incomingOf(n, good) {
+    if (n.type === 'house') return this.buildings.reduce((a, b) => a + (b.type === 'house' ? (b.incoming.bread || 0) : 0), 0);
+    return n.incoming[good] || 0;
+  }
+  space(n, good) { return this.capOf(n) - this.stockOf(n, good) - this.incomingOf(n, good); }
   _addStock(n, good, k) { if (n.type === 'house') this.pantry.bread += k; else n.inv[good] = (n.inv[good] || 0) + k; }
+  ports(n) { return this.grid.ports(n.x, n.z); }
 
   // ------------------------------------------------------------ workers
   workersTotal() { return this.buildings.filter((b) => b.type === 'house' && b.built).reduce((a, b) => a + DEFS.house.workers[b.level - 1], 0); }
   workersUsed() {
-    let w = this.buildings.reduce((a, b) => a + staffFor(b.type, b.level), 0);
-    for (const r of this.routes) w += TRANSPORT[r.type].staff * r.vehicles.length;
+    let w = this.buildings.reduce((a, b) => a + staffFor(b.type, b.level) + b.carriers.length, 0);
     for (let l = 1; l < this.site.level; l++) w += SITE_UP[l - 1].staff;
     return w;
   }
@@ -115,23 +124,47 @@ export class Economy {
     return p;
   }
   plotFree(plotId) { return !this.buildings.some((b) => b.plot === plotId); }
+  staffNeeded(type) { return DEFS[type].staff + (DEFS[type].out ? 1 : 0); }
 
   // ------------------------------------------------------------ building
   canBuild(type, plotId) {
-    const d = DEFS[type], plot = this.plots.find((p) => p.id === plotId);
+    const d = DEFS[type], plot = this.plotOf(plotId);
     if (!plot || !this.plotFree(plotId) || plot.terrain !== d.terrain) return false;
     if (!this.L.allowed.includes(type)) return false;
-    return this.deben >= d.cost && this.workersFree() >= d.staff;
+    return this.deben >= d.cost && this.workersFree() >= this.staffNeeded(type);
   }
 
   build(type, plotId, { free = false, instant = false } = {}) {
     const d = DEFS[type];
     if (!free) { if (!this.canBuild(type, plotId)) return null; this.deben -= d.cost; }
-    const b = { id: this.nextId++, type, plot: plotId, level: 1, t: 0, busy: false, state: instant ? 'idle' : 'build', built: instant, buildT: instant ? 0 : 3,
-      made: 0, eatT: d.eat || 0, hungry: false, inv: {}, incoming: {}, out: 0 };
+    const p = this.plotOf(plotId);
+    const b = { id: this.nextId++, type, plot: plotId, x: p.x, z: p.z, level: 1, t: 0, busy: false, state: instant ? 'idle' : 'build', built: instant, buildT: instant ? 0 : 3,
+      made: 0, eatT: d.eat || 0, hungry: false, inv: {}, incoming: {}, out: 0, carriers: [], linked: false };
     this.buildings.push(b);
+    if (d.out) this._carrier(b);
+    this.topo++;
     this.emit({ type: 'built', b, instant });
     return b;
+  }
+
+  carrierKind(b) {
+    if (DEFS[b.type].boat) return 'boat';
+    if (!HEAVY.has(goodOf(b.type))) return 'porter';
+    return this.L.ox && b.level >= 3 ? 'ox' : 'sledge';
+  }
+  _carrier(b) {
+    const c = { id: `${b.id}:${b.carriers.length}`, home: b.id, slot: b.carriers.length, kind: this.carrierKind(b), phase: 'idle', t: 0, load: 0, good: goodOf(b.type), wait: b.carriers.length * 0.7, path: null, len: 0, progress: 0 };
+    b.carriers.push(c);
+    this.emit({ type: 'carrier', b, c });
+    return c;
+  }
+  carrierCost(b) { return HEAVY.has(goodOf(b.type)) ? CARRIER_COST.heavy : CARRIER_COST.light; }
+  canAddCarrier(b) { return b.built && !!DEFS[b.type].out && b.carriers.length < MAX_CARRIERS && this.deben >= this.carrierCost(b) && this.workersFree() >= 1; }
+  addCarrier(b) {
+    if (!this.canAddCarrier(b)) return false;
+    this.deben -= this.carrierCost(b);
+    this._carrier(b);
+    return true;
   }
 
   canUpgrade(b) {
@@ -148,81 +181,74 @@ export class Economy {
     return true;
   }
 
-  // ------------------------------------------------------------ routes
-  routePath(from, to) {
-    const a = this.posOf(from), b = this.posOf(to);
-    if (crossesRiver(a, b)) return { pts: riverPath(a, b), water: true };
-    return { pts: landPath(a, b, this.R), water: false };
+  // ------------------------------------------------------------ roads
+  roadAt(x, z) { return this.grid.get(x, z); }
+  // cost of painting a tile (0 = nothing to do, -1 = not possible here)
+  roadPrice(x, z, type) {
+    if (!this.grid.free(x, z)) return -1;
+    const cur = this.grid.get(x, z);
+    if (cur >= type) return 0;
+    return ROAD_COST[type] - (cur ? ROAD_COST[cur] : 0);
+  }
+  // returns the price paid, 0 (already there), -1 (not buildable) or -2 (too expensive)
+  placeRoad(x, z, type) {
+    const price = this.roadPrice(x, z, type);
+    if (price <= 0) return price;
+    if (this.deben < price) return -2;
+    this.deben -= price;
+    this.roadSpent += price;
+    this.grid.set(x, z, type);
+    this.topo++;
+    this.emit({ type: 'road', x, z, kind: type });
+    return price;
+  }
+  eraseRoad(x, z) {
+    const cur = this.grid.get(x, z);
+    if (!cur) return false;
+    this.deben += Math.floor(ROAD_COST[cur] / 2);
+    this.grid.set(x, z, 0);
+    this.topo++;
+    this.emit({ type: 'unroad', x, z });
+    return true;
+  }
+  // tiles of road still to build so that two nodes are joined by the given road type
+  suggestRoad(fromId, toId, type) {
+    const a = this.node(fromId), b = this.node(toId);
+    if (!a || !b) return null;
+    const tiles = this.grid.suggest(this.ports(a), this.ports(b), type);
+    if (!tiles) return null;
+    return tiles.filter((i) => this.grid.road[i] < type);
   }
 
-  // what a route between two nodes would carry and which transports are possible
-  routeOptions(fromId, toId) {
-    const from = this.node(fromId), to = this.node(toId);
-    if (!from || !to || from === to || !from.built) return null;
-    const good = this.produces(from);
-    if (!good || !this.accepts(to, good)) return null;
-    if (this.routes.some((r) => r.from === fromId && r.to === toId)) return null;
-    const water = this.routePath(from, to).water;
-    if (water && !(from.type === 'granite' && to.type === 'quay')) return null;
-    const types = TRANSPORT_ORDER.filter((t) => this.L.transports.includes(t)).map((t) => {
-      const T = TRANSPORT[t];
-      const fits = water ? !!T.water : !T.water && !(T.light && HEAVY.has(good));
-      return { type: t, fits, money: this.deben >= T.cost, hands: this.workersFree() >= T.staff };
-    }).filter((x) => x.fits);
-    return types.length ? { good, types, water } : null;
+  _bfs(n, heavy) {
+    const key = `${n.id}:${heavy ? 1 : 0}`;
+    const c = this._bfsCache.get(key);
+    if (c && c.topo === this.topo) return c.res;
+    const res = this.grid.bfs(this.ports(n), heavy);
+    this._bfsCache.set(key, { topo: this.topo, res });
+    return res;
   }
 
-  validTargets(fromId) {
+  consumersOf(good) {
     const out = [];
-    for (const n of [...this.buildings, this.site]) if (this.routeOptions(fromId, n.id)) out.push(n.id);
+    for (const n of [...this.buildings, this.site]) if (this.accepts(n, good)) out.push(n);
     return out;
   }
 
-  addRoute(fromId, toId, type) {
-    const opt = this.routeOptions(fromId, toId);
-    if (!opt) return null;
-    const T = TRANSPORT[type];
-    if (!opt.types.some((x) => x.type === type)) return null;
-    if (this.routes.filter((r) => r.from === fromId).length >= MAX_ROUTES) return null;
-    if (this.deben < T.cost || this.workersFree() < T.staff) return null;
-    this.deben -= T.cost;
-    const from = this.node(fromId), to = this.node(toId);
-    const p = this.routePath(from, to);
-    const r = { id: this.nextId++, from: fromId, to: toId, good: opt.good, type, pts: p.pts, len: pathLength(p.pts), vehicles: [] };
-    this.routes.push(r);
-    this._vehicle(r);
-    this.emit({ type: 'route', r });
-    return r;
-  }
-
-  _vehicle(r) {
-    const v = { id: `${r.id}:${r.vehicles.length}`, route: r, phase: 'wait', t: 0, load: 0, wait: r.vehicles.length * 0.8 };
-    r.vehicles.push(v);
-    this.emit({ type: 'vehicle', r, v });
-    return v;
-  }
-
-  canAddVehicle(r) { const T = TRANSPORT[r.type]; return r.vehicles.length < MAX_VEHICLES && this.deben >= T.cost && this.workersFree() >= T.staff; }
-  addVehicle(r) {
-    if (!this.canAddVehicle(r)) return false;
-    this.deben -= TRANSPORT[r.type].cost;
-    this._vehicle(r);
-    return true;
-  }
-
-  removeRoute(r) {
-    const i = this.routes.indexOf(r);
-    if (i < 0) return;
-    const to = this.node(r.to), from = this.node(r.from);
-    for (const v of r.vehicles) {
-      if (v.load) {
-        // cargo on the way goes back to the source (or is lost if it is full)
-        if (to && to.incoming) to.incoming[r.good] = Math.max(0, (to.incoming[r.good] || 0) - v.load);
-        if (from) from.out = Math.min(OUT_CAP, from.out + v.load);
-      }
+  // nodes a producer can deliver to over the current roads, nearest first
+  reachable(b) {
+    const good = goodOf(b.type);
+    if (!good || !b.built) return [];
+    const cons = this.consumersOf(good).filter((n) => n !== b);
+    if (DEFS[b.type].boat) return cons.filter((n) => n.type === 'quay').map((n) => ({ n, d: Math.hypot(n.x - b.x, n.z - b.z), boat: true }));
+    const res = this._bfs(b, HEAVY.has(good));
+    const out = [];
+    for (const n of cons) {
+      const p = this.grid.pathTo(res, this.ports(n));
+      if (p) out.push({ n, d: p.d, p });
     }
-    this.routes.splice(i, 1);
-    this.emit({ type: 'unroute', r });
+    out.sort((x, y) => x.d - y.d);
+    return out;
   }
 
   // ------------------------------------------------------------ events: Nile flood and sandstorm
@@ -264,7 +290,7 @@ export class Economy {
     for (const b of this.buildings) {
       if (!b.built) {
         b.buildT -= dt;
-        if (b.buildT <= 0) { b.built = true; b.state = 'idle'; this.emit({ type: 'ready', b }); }
+        if (b.buildT <= 0) { b.built = true; b.state = 'idle'; this.topo++; this.emit({ type: 'ready', b }); }
         continue;
       }
       const d = DEFS[b.type];
@@ -282,6 +308,7 @@ export class Economy {
         b.state = b.hungry ? 'hungry' : 'ok';
         continue;
       }
+      if (b._topo !== this.topo) { b._topo = this.topo; b.targets = this.reachable(b); b.linked = b.targets.length > 0; }
       if (b.type === 'farm' && this.floodActive()) { b.state = 'flooded'; continue; }
       if (!b.busy) {
         const need = d.in || [];
@@ -313,43 +340,11 @@ export class Economy {
       }
     }
 
-    // vehicles
-    for (const r of this.routes) {
-      const from = this.node(r.from), to = this.node(r.to);
-      const T = TRANSPORT[r.type];
-      const travel = r.len / (T.speed * Math.max(0.35, prod));
-      for (const v of r.vehicles) {
-        if (v.wait > 0) { v.wait -= dt; continue; }
-        if (v.phase === 'wait') {
-          if (!from || !to) continue;
-          const k = Math.min(T.cap, from.out, this.space(to, r.good));
-          if (k >= 1 && from.built) {
-            from.out -= k; v.load = k;
-            if (to.incoming) to.incoming[r.good] = (to.incoming[r.good] || 0) + k;
-            v.phase = 'load'; v.t = 0;
-            this.emit({ type: 'load', r, v });
-          }
-        } else if (v.phase === 'load') {
-          v.t += dt; if (v.t >= LOAD_TIME) { v.phase = 'go'; v.t = 0; }
-        } else if (v.phase === 'go') {
-          v.t += dt;
-          if (v.t >= travel) { v.phase = 'unload'; v.t = 0; }
-        } else if (v.phase === 'unload') {
-          v.t += dt;
-          if (v.t >= LOAD_TIME) {
-            if (to) {
-              if (to.incoming) to.incoming[r.good] = Math.max(0, (to.incoming[r.good] || 0) - v.load);
-              this._addStock(to, r.good, v.load);
-              this.emit({ type: 'deliver', r, v, good: r.good, n: v.load, to });
-            }
-            v.load = 0; v.phase = 'back'; v.t = 0;
-          }
-        } else if (v.phase === 'back') {
-          v.t += dt;
-          if (v.t >= travel) { v.phase = 'wait'; v.t = 0; }
-        }
-        v.progress = v.phase === 'go' ? Math.min(1, v.t / travel) : v.phase === 'back' ? 1 - Math.min(1, v.t / travel) : v.phase === 'unload' ? 1 : 0;
-      }
+    // carriers
+    const tempo = Math.max(0.4, prod);
+    for (const b of this.buildings) {
+      if (!b.carriers.length || !b.built) continue;
+      for (const c of b.carriers) this._stepCarrier(b, c, dt, tempo);
     }
 
     // construction site: the ramp crew hauls one stone at a time up and sets it
@@ -370,6 +365,53 @@ export class Economy {
         }
       } else { S.placeT = Math.min(S.placeT, SITE_PLACE[S.level - 1] * 0.3); S.state = 'missing'; S.missing = good; }
     }
+  }
+
+  _stepCarrier(b, c, dt, tempo) {
+    if (c.wait > 0) { c.wait -= dt; return; }
+    const T = CARRIER[c.kind];
+    if (c.phase === 'idle') {
+      const kind = this.carrierKind(b);
+      if (kind !== c.kind) { c.kind = kind; this.emit({ type: 'carrierKind', b, c }); }
+      if (b.out < 1 || !b.targets || !b.targets.length) return;
+      // nearest consumer with room
+      let pick = null;
+      for (const t of b.targets) {
+        if (!this.accepts(t.n, c.good)) continue;
+        const room = this.space(t.n, c.good);
+        if (room >= 1) { pick = { t, room }; break; }
+      }
+      if (!pick) return;
+      const k = Math.min(CARRIER[c.kind].cap, b.out, pick.room);
+      const to = pick.t.n;
+      b.out -= k; c.load = k; c.to = to.id;
+      to.incoming[c.good] = (to.incoming[c.good] || 0) + k;
+      if (pick.t.boat) c.path = riverPolyline(b, to);
+      else c.path = tilePolyline(pick.t.p.tiles, this.ports(b).find((p) => p.i === pick.t.p.tiles[0]), pick.t.p.end);
+      c.len = Math.max(0.5, polyLength(c.path));
+      c.phase = 'load'; c.t = 0;
+      this.emit({ type: 'load', b, c });
+    } else if (c.phase === 'load') {
+      c.t += dt; if (c.t >= LOAD_TIME) { c.phase = 'go'; c.t = 0; }
+    } else if (c.phase === 'go') {
+      c.t += dt * T.speed * tempo;
+      if (c.t >= c.len) { c.phase = 'unload'; c.t = 0; }
+    } else if (c.phase === 'unload') {
+      c.t += dt;
+      if (c.t >= LOAD_TIME) {
+        const to = this.node(c.to);
+        if (to) {
+          to.incoming[c.good] = Math.max(0, (to.incoming[c.good] || 0) - c.load);
+          this._addStock(to, c.good, c.load);
+          this.emit({ type: 'deliver', b, c, good: c.good, n: c.load, to });
+        }
+        c.load = 0; c.phase = 'back'; c.t = 0;
+      }
+    } else if (c.phase === 'back') {
+      c.t += dt * T.speed * tempo * 1.15;
+      if (c.t >= c.len) { c.phase = 'idle'; c.t = 0; c.path = null; }
+    }
+    c.progress = c.phase === 'go' ? Math.min(1, c.t / c.len) : c.phase === 'back' ? 1 - Math.min(1, c.t / c.len) : c.phase === 'unload' ? 1 : 0;
   }
 
   _tierOf(i) {

@@ -140,3 +140,11 @@ for n in ['quay', 'granite']:
 tex('mudbrick', '../v3/mudbrick.png', (512, 512))
 json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
 print('route assets ok')
+
+# ---------------- road game additions ----------------
+for n in ['btn_road', 'btn_erase']:
+    sizes[n] = ui(n, n + '.png', 200, 200)
+for n in ['t_path', 't_track', 'r_store']:
+    sizes[n] = ui(n, n + '.png', 180, 180)
+json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
+print('road assets ok')
