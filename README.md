@@ -1,6 +1,9 @@
 # Purpursonne Pyramide
 
-Isometrisches Pyramiden-Puzzle für das iPhone (Safari / Home-Bildschirm). Alle Grafiken, Icons,
+Isometrisches Pyramiden-Puzzle für das iPhone (Safari / Home-Bildschirm).
+
+**Spielen:** https://marcelweissgerberit.github.io/Egypts/
+(auf dem iPhone in Safari öffnen, dann „Teilen → Zum Home-Bildschirm“ für Vollbild) Alle Grafiken, Icons,
 Ziffern, 3D-Figuren, Musik und Fanfare wurden mit **Higgsfield** erzeugt, die 3D-Modelle,
 Rigs und Animationen mit **Meshy** (über Higgsfield). Im Spiel gibt es keine Schrift: jede
 Beschriftung, jede Zahl und jeder Knopf ist ein Bild.
@@ -36,4 +39,5 @@ node tools/serve.cjs dist  # http://localhost:8080
 | `tools/` | Bild-/Modell-Aufbereitung, Build, lokaler Server, Balancing-Simulation |
 | `art/jobs.json` | Higgsfield/Meshy-Job-IDs der Rohdateien |
 
-`dist/` lässt sich auf jedem statischen Hoster (z. B. GitHub Pages) ausliefern.
+`npm run deploy` baut das Spiel und veröffentlicht `dist/` auf dem Branch `gh-pages`
+(GitHub Pages: Settings → Pages → „Deploy from a branch“, Branch `gh-pages`, Ordner `/ (root)`).

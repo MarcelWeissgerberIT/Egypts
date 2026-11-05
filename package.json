@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
-    "serve": "npx --yes http-server dist -p 8080 -c-1"
+    "serve": "npx --yes http-server dist -p 8080 -c-1",
+    "deploy": "bash tools/deploy_pages.sh"
   },
   "dependencies": {
     "three": "^0.170.0"
