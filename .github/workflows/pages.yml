@@ -37,3 +37,6 @@ jobs:
           path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # the Pages backend sometimes needs longer than the default 10 minutes
+          timeout: 1500000
