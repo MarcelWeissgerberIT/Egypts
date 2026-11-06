@@ -148,3 +148,14 @@ for n in ['t_path', 't_track', 'r_store']:
     sizes[n] = ui(n, n + '.png', 180, 180)
 json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
 print('road assets ok')
+
+# ---------------- brick ramp additions ----------------
+for n in ['btn_undo']:
+    sizes[n] = ui(n, n + '.png', 200, 200)
+for n in ['r_brick']:
+    sizes[n] = ui(n, n + '.png', 160, 160)
+im = key_white(Image.open(os.path.join(SRC, 'v4', 'brickworks.png')))
+im = trim(im); im = fit(im, 240, 240)
+im.save(os.path.join(OUT, 'ui', 'b_brickworks.webp'), 'WEBP', quality=88, method=6)
+json.dump({k: list(v) for k, v in sizes.items()}, open(os.path.join(OUT, 'ui', 'sizes.json'), 'w'), indent=0)
+print('brick assets ok')

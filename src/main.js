@@ -6,11 +6,11 @@ import { UI } from './ui.js';
 import { Audio } from './audio.js';
 import { LEVELS, tierSizes } from './levels.js';
 import { PLOTS } from './map.js';
-import { Economy, DEFS, MAX_LEVEL, upgradeCost, staffFor, cycleOf, PAY, TIER_PAY, SITE_PLACE, SITE_UP, OUT_CAP, HEAVY, goodOf, PATH, TRACK } from './economy.js';
+import { Economy, DEFS, MAX_LEVEL, upgradeCost, staffFor, cycleOf, PAY, TIER_PAY, SITE_PLACE, SITE_UP, OUT_CAP, HEAVY, goodOf, PATH, TRACK, rampBricks } from './economy.js';
 
 const SAVE_KEY = 'purple-sun-works-v2';
 const TOOL_TYPE = { path: PATH, track: TRACK };
-const BUILDINGS = ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy', 'granite', 'quay'];
+const BUILDINGS = ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy', 'granite', 'quay', 'brickworks'];
 const LP_CLIPS = ['walk', 'carry', 'hammer', 'chop', 'reap', 'pick', 'place', 'push', 'lever', 'water', 'cheer', 'talk', 'shrug'];
 
 function loadSave() {
@@ -29,10 +29,10 @@ async function loadAssets(onProgress) {
   const models = ['worker', 'worker_lp', 'pharaoh', 'priestess', 'sphinx', 'obelisk', 'palm', 'camel', 'sledge', 'temple', 'anubis', 'boat', 'brazier', 'oxcart',
     'anim_worker_walk', 'anim_worker_cheer', 'anim_worker_idle', 'anim_pharaoh_cheer', 'anim_pharaoh_stomp', 'anim_priestess_cast', 'anim_priestess_dance',
     ...LP_CLIPS.map((c) => 'anim_lp_' + c), ...BUILDINGS];
-  const uiImgs = ['btn_play', 'btn_pause', 'btn_restart', 'btn_next', 'btn_home', 'btn_sound_on', 'btn_sound_off', 'btn_shuffle', 'btn_up', 'btn_close', 'btn_add', 'btn_road', 'btn_erase', 't_path', 't_track',
+  const uiImgs = ['btn_play', 'btn_pause', 'btn_restart', 'btn_next', 'btn_home', 'btn_sound_on', 'btn_sound_off', 'btn_shuffle', 'btn_up', 'btn_close', 'btn_add', 'btn_road', 'btn_erase', 'btn_undo', 't_path', 't_track',
     'icon_scarab', 'icon_sun', 'icon_eye', 'icon_eye_empty', 'icon_lock', 'icon_pyramid', 'icon_speed', 'icon_full', 'icon_target', 'hand', 'panel', 'banner_win', 'banner_lose',
     'medallion', 'plaque', 'plot', 'bubble', 't_porter', 't_sledge', 't_ox', 't_boat',
-    'r_deben', 'r_worker', 'r_grain', 'r_bread', 'r_stone', 'r_block', 'r_tools', 'r_ore', 'r_granite', ...BUILDINGS.map((b) => 'b_' + b),
+    'r_deben', 'r_worker', 'r_grain', 'r_bread', 'r_stone', 'r_block', 'r_tools', 'r_ore', 'r_granite', 'r_brick', ...BUILDINGS.map((b) => 'b_' + b),
     'd0', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd_plus', 'd_x'];
   const total = Object.keys(texFiles).length + models.length + uiImgs.length;
   let done = 0;
@@ -126,6 +126,7 @@ class Game {
     ui.on('roadMode', () => { click(); if (this.roadMode) this._endRoadMode(); else this._startRoadMode(); });
     ui.on('roadTool', (t) => { click(); if (this.roadMode) { this.roadMode.tool = t; this.ui.showRoadBar(t); } });
     ui.on('roadDone', () => { click(); this._endRoadMode(); });
+    ui.on('roadUndo', () => this._undoRoad());
     ui.on('addCarrier', () => this._addCarrier());
 
     const c = document.getElementById('gl');
@@ -182,9 +183,10 @@ class Game {
     this.ui.setEvent(null);
     this.ui.setStorm(false);
     this.ui.hideHand();
-    this.resVisible = ['worker', 'bread', 'block', ...(L.graniteTiers ? ['granite'] : [])];
+    this.resVisible = ['worker', 'bread', 'block', ...(L.bricks ? ['brick'] : []), ...(L.graniteTiers ? ['granite'] : [])];
     this.advisor = (i === 0 && !this.save.tut) ? { step: 0 } : null;
     this.advice = null;
+    this._hint = null;
     this._refreshMarkers();
     this._hudT = 0; this._bubT = 0;
     this._updateHud();
@@ -212,7 +214,9 @@ class Game {
         case 'deliver':
           if (e.to.type === 'site' && this.state === 'play' && Math.random() < 0.5) this.audio.tick(false);
           break;
-        case 'made': this.world.popIcon(e.b, 'r_' + e.good); break;
+        case 'made': this.world.popIcon(e.b, 'r_' + e.good); this.world.runnerTrip(e.b, e.good); break;
+        case 'rampBrick': if (this.state === 'play') this.audio.place(false); break;
+        case 'rampUp': this.world.crowdCheer(1.6); this.audio.tier(); this.ui.popIcon(this.vw / 2, (this.freeTop + this.freeBottom) / 2, 'r_brick', 80); break;
         case 'placed': {
           const p = this.world.placeBlock(e.index, e.good);
           this.audio.block();
@@ -320,6 +324,8 @@ class Game {
     return {
       level: L, need: this.eco.currentGood(), secs: Math.round(SITE_PLACE[L - 1] * 10) / 10 >= 2 ? Math.round(SITE_PLACE[L - 1]) : 2,
       block: S.inv.block, granite: this.L.graniteTiers ? S.inv.granite : null,
+      brick: this.L.bricks ? S.inv.brick : null,
+      ramp: this.L.bricks && S.ramp < this.sizes.length - 1 ? { laid: S.rampLaid, need: rampBricks(S.ramp + 1), active: S.ramp < Math.min(this.eco.currentTier(), this.sizes.length - 1) } : null,
       status: S.state === 'missing' && this.eco.placed < this.eco.total ? 'r_' + S.missing : null,
       upCost: up ? up.cost : 0, upStaff: up ? up.staff : 0,
       money: up ? this.eco.deben >= up.cost : false, hands: up ? this.eco.workersFree() >= up.staff : false, canUpgrade: this.eco.canUpgrade(S),
@@ -365,6 +371,7 @@ class Game {
     const t = tool || this.roadMode?.tool || this._lastTool || 'track';
     this.roadMode = { tool: t };
     this.ui.showRoadBar(t);
+    this.ui.setUndo(this.eco.canUndo());
     this.world.showGrid(true, this.eco);
     this._refreshMarkers();
   }
@@ -372,42 +379,95 @@ class Game {
     if (!this.roadMode) return;
     this._lastTool = this.roadMode.tool;
     this.roadMode = null;
-    this.paint = null;
+    this._cancelStroke();
     this.ui.hideRoadBar();
     this.world.showGrid(false);
     this._refreshMarkers();
   }
 
-  // paint (or erase) the tiles between the last painted tile and the one under the finger
-  _paintTo(x, y) {
+  // ---- road strokes: drag from a building (or tile) to another; the route is planned and previewed
+  // with its price, releasing builds it. A tap paints one tile; the eraser removes tiles under the finger.
+  _strokeStart(x, y) {
     const t = this.world.pickTile(x, y);
     if (!t) return;
-    const P = this.paint;
-    const steps = [];
-    if (!P.last) steps.push(t);
-    else {
-      let cx = P.last.x, cz = P.last.z;
-      while (cx !== t.x || cz !== t.z) {
-        // 4-connected walk: move along the axis with the larger remaining distance
-        if (Math.abs(t.x - cx) >= Math.abs(t.z - cz)) cx += Math.sign(t.x - cx); else cz += Math.sign(t.z - cz);
-        steps.push({ x: cx, z: cz });
-        if (steps.length > 40) break;
-      }
-    }
-    for (const q of steps) this._paintTile(q.x, q.z);
-    P.last = t;
+    const E = this.eco, RM = this.roadMode;
+    this.paint = { start: t, cur: t, plan: null, moved: false, erased: [], refund: 0, last: t };
+    if (RM.tool === 'erase') { this._eraseTile(t.x, t.z); return; }
+    // heavy goods leave quarries, masons, quays (and arrive at the site) only on sledge tracks
+    const n = E.nodeAtTile(t.x, t.z);
+    if (n && RM.tool === 'path' && (n.type === 'site' || HEAVY.has(goodOf(n.type) || '') || n.type === 'mason')) { RM.tool = 'track'; this.ui.showRoadBar('track'); }
   }
 
-  _paintTile(x, z) {
-    const E = this.eco, tool = this.roadMode.tool;
-    if (tool === 'erase') {
-      if (E.eraseRoad(x, z)) { this.world.roadFx(x, z, 'erase'); this._sfx('erase'); }
+  _strokeMove(x, y) {
+    const P = this.paint, RM = this.roadMode;
+    const t = this.world.pickTile(x, y);
+    if (!t) return;
+    if (RM.tool === 'erase') {
+      // walk tile by tile so a fast swipe does not skip tiles
+      let cx = P.last.x, cz = P.last.z;
+      while (cx !== t.x || cz !== t.z) {
+        if (Math.abs(t.x - cx) >= Math.abs(t.z - cz)) cx += Math.sign(t.x - cx); else cz += Math.sign(t.z - cz);
+        this._eraseTile(cx, cz);
+      }
+      P.last = t;
       return;
     }
-    const r = E.placeRoad(x, z, TOOL_TYPE[tool]);
-    if (r > 0) { this.world.roadFx(x, z, tool); this._sfx('road'); this.paint.spent += r; }
-    else if (r === -1) this.world.roadFx(x, z, 'bad');
-    else if (r === -2) { this.world.roadFx(x, z, 'bad'); this._sfx('poor'); this.ui.flashRoadCost(tool); this.ui.shakeHud(); }
+    if (t.x === P.cur.x && t.z === P.cur.z && P.moved) { this.ui.showRoadCost(x, y, P.plan ? P.plan.price : 0, !P.plan || P.plan.price <= this.eco.deben); return; }
+    P.cur = t; P.moved = true;
+    P.plan = this.eco.planRoad(P.start, t, TOOL_TYPE[RM.tool]);
+    const ok = !!P.plan && P.plan.price <= this.eco.deben;
+    this.world.setPreview(P.plan ? P.plan.route : null, ok);
+    if (P.plan) this.ui.showRoadCost(x, y, P.plan.price, ok); else this.ui.hideRoadCost();
+  }
+
+  _strokeEnd(x, y) {
+    const P = this.paint, E = this.eco, RM = this.roadMode;
+    this.paint = null;
+    this.world.setPreview(null);
+    this.ui.hideRoadCost();
+    if (!P || !RM) return;
+    if (RM.tool === 'erase') {
+      if (P.erased.length) E.undoStack.push({ tiles: P.erased, spent: -P.refund });
+    } else if (!P.moved) {
+      const r = E.placeRoadStep(P.start.x, P.start.z, TOOL_TYPE[RM.tool]);
+      if (r > 0) { this.world.roadFx(P.start.x, P.start.z, RM.tool); this._sfx('road'); }
+      else if (r === -2) { this.world.roadFx(P.start.x, P.start.z, 'bad'); this._sfx('poor'); this.ui.flashRoadCost(RM.tool); this.ui.shakeHud(); }
+      else if (r === -1) this.world.roadFx(P.start.x, P.start.z, 'bad');
+    } else if (P.plan) {
+      if (P.plan.price > E.deben) { for (const i of P.plan.todo) this.world.roadFx(Math.floor(i / 35) - 17, (i % 35) - 17, 'bad'); this._sfx('poor'); this.ui.flashRoadCost(RM.tool); this.ui.shakeHud(); }
+      else {
+        const spent = E.buildPlanned(P.plan, TOOL_TYPE[RM.tool]);
+        // the new road is laid from start to end in a quick wave of dust
+        P.plan.route.forEach((i, k) => this.later(k * 25, () => this.world.roadFx(Math.floor(i / 35) - 17, (i % 35) - 17, RM ? RM.tool : 'path')));
+        if (spent > 0) { this.audio.place(true); this.ui.popup(x, y - 50, spent, { icon: 'r_deben', size: 18, prefix: 'x' }); }
+        const linked = P.plan.from && P.plan.to;
+        if (linked) this.later(Math.min(900, P.plan.route.length * 25), () => this.audio.ankh());
+      }
+    }
+    this.ui.setUndo(E.canUndo());
+    this._updateHud();
+  }
+
+  _cancelStroke() { if (this.paint) { this.paint = null; this.world.setPreview(null); this.ui.hideRoadCost(); } }
+
+  _eraseTile(x, z) {
+    const E = this.eco, before = E.grid.get(x, z);
+    if (!before) return;
+    const deben0 = E.deben;
+    if (E.eraseRoad(x, z)) {
+      this.paint.erased.push([x, z, before]); this.paint.refund += E.deben - deben0;
+      this.world.roadFx(x, z, 'erase'); this._sfx('erase');
+    }
+  }
+
+  _undoRoad() {
+    if (!this.roadMode) return;
+    const step = this.eco.undoRoad();
+    if (!step) { this.audio.invalid(); return; }
+    for (const [x, z] of step.tiles) this.world.roadFx(x, z, 'erase');
+    this.audio.shuffle();
+    this.ui.setUndo(this.eco.canUndo());
+    this._updateHud();
   }
 
   _sfx(kind) {
@@ -440,10 +500,9 @@ class Game {
       const [a, b] = [...this.pointers.values()];
       this.pinch = Math.hypot(a.x - b.x, a.y - b.y); this.mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       a.moved = b.moved = true;
-      this.paint = null;
+      this._cancelStroke();
     } else if (this.roadMode && this.pointers.size === 1) {
-      this.paint = { last: null, spent: 0 };
-      this._paintTo(e.clientX, e.clientY);
+      this._strokeStart(e.clientX, e.clientY);
     }
   }
 
@@ -462,7 +521,7 @@ class Game {
       this.pinch = d; this.mid = mid;
       return;
     }
-    if (this.paint) { this._paintTo(e.clientX, e.clientY); p.x = e.clientX; p.y = e.clientY; p.moved = true; return; }
+    if (this.paint) { this._strokeMove(e.clientX, e.clientY); p.x = e.clientX; p.y = e.clientY; p.moved = true; return; }
     if (!p.moved && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 8) p.moved = true;
     if (p.moved) {
       const a = this.world.screenToPlane(p.x, p.y, 0), b = this.world.screenToPlane(e.clientX, e.clientY, 0);
@@ -475,15 +534,7 @@ class Game {
     const p = this.pointers.get(e.pointerId);
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) { this.pinch = null; this.mid = null; }
-    if (this.paint && this.pointers.size === 0) {
-      const spent = this.paint.spent;
-      this.paint = null;
-      if (spent > 0) {
-        this.ui.popup(e.clientX, e.clientY - 40, spent, { icon: 'r_deben', size: 18, prefix: 'x' });
-        this._updateHud();
-      }
-      return;
-    }
+    if (this.paint && this.pointers.size === 0) { this._strokeEnd(e.clientX, e.clientY); return; }
     if (!p || p.moved || this.state !== 'play' || this.roadMode) return;
     if (performance.now() - p.t0 > 600) return;
     const hit = this._pick(e.clientX, e.clientY);
@@ -545,12 +596,13 @@ class Game {
     const E = this.eco;
     this.ui.setDeben(E.deben);
     this.ui.setProgress(E.placed, E.total);
-    const r = { worker: E.workersFree(), bread: E.pantry.bread, block: E.site.inv.block, granite: E.site.inv.granite };
+    const r = { worker: E.workersFree(), bread: E.pantry.bread, block: E.site.inv.block, granite: E.site.inv.granite, brick: E.site.inv.brick };
     this.ui.setResources(r, this.resVisible);
     this.ui.flagRes('bread', E.hungryShare() > 0);
     this.ui.flagRes('worker', E.workersFree() <= 0);
-    this.ui.flagRes('block', E.site.state === 'missing' && E.currentGood() === 'block' && E.placed < E.total);
-    this.ui.flagRes('granite', E.site.state === 'missing' && E.currentGood() === 'granite' && E.placed < E.total);
+    this.ui.flagRes('block', E.site.state === 'missing' && E.site.missing === 'block' && E.placed < E.total);
+    this.ui.flagRes('granite', E.site.state === 'missing' && E.site.missing === 'granite' && E.placed < E.total);
+    this.ui.flagRes('brick', E.site.state === 'missing' && E.site.missing === 'brick' && E.placed < E.total);
     const left = Math.max(0, this.L.deadline - E.time);
     const frac = left / this.L.deadline;
     this.ui.setTime(frac, frac < 0.2);
@@ -560,6 +612,22 @@ class Game {
     if (this.selected?.plot) this._showBuildMenu();
     else if (this.selected?.site) this._showSite();
     else if (this.selected?.building) { const b = E.buildings.find((x) => x.id === this.selected.building); if (b) this._showBuilding(b); }
+  }
+
+  // light hints after the tutorial: the ramp needs mud bricks and nobody makes them yet
+  _hints() {
+    const E = this.eco, S = E.site;
+    const need = this.L.bricks && S.state === 'missing' && S.missing === 'brick' && !E.buildings.some((b) => b.type === 'brickworks');
+    if (!need || this.roadMode) { if (this._hint) { this._hint = null; this.advice = null; this.ui.hideHand(); this._refreshMarkers(); } return; }
+    const plot = PLOTS.filter((p) => p.terrain === 'desert' && E.plotFree(p.id)).sort((a, b) => Math.hypot(a.x - S.x, a.z - S.z) - Math.hypot(b.x - S.x, b.z - S.z))[0];
+    if (!plot) return;
+    this._hint = 'brick';
+    if (!this.advice || this.advice.plot !== plot.id) { this.advice = { plot: plot.id }; this._refreshMarkers(); }
+    let at;
+    if (this.selected?.plot === plot.id) { const el = document.querySelector('[data-type="brickworks"]'); if (el) { const r = el.getBoundingClientRect(); at = { x: r.left + r.width / 2, y: r.top + r.height * 0.6 }; } }
+    else if (!this.ui.sheetOpen) at = this.world.worldToScreen(this.world.plotViews[plot.id].pos.clone().setY(0.4));
+    if (!at) { this.ui.hideHand(); return; }
+    this.ui.handAt(at.x, at.y + 8 + Math.abs(Math.sin(performance.now() / 260)) * 12, 'b_brickworks');
   }
 
   // first-level guide: points at the next step (deposit, building card, road tool, road to paint)
@@ -648,7 +716,13 @@ class Game {
       this._handleEvents(this.eco.drain());
       this._hudT -= dt; this._bubT -= dt;
       if (this._hudT <= 0) { this._hudT = 0.15; this._updateHud(); }
-      if (this._bubT <= 0) { this._bubT = 0.25; for (const b of this.eco.buildings) this.world.setBubble(b, statusKey(b)); }
+      if (this._bubT <= 0) {
+        this._bubT = 0.25;
+        for (const b of this.eco.buildings) this.world.setBubble(b, statusKey(b));
+        const S = this.eco.site;
+        this.world.setSiteBubble(S.state === 'missing' && this.eco.placed < this.eco.total && this.eco.time > 20 ? 'r_' + S.missing : null);
+      }
+      if (!this.advisor) this._hints();
       if (this.advisor) this._advisorStep();
       if (this.eco.done()) this.levelComplete();
       else if (this.eco.time >= this.L.deadline) this.lose();
@@ -658,7 +732,8 @@ class Game {
       this.world.syncRoads(this.eco);
       this.world.syncCarriers(this.eco, gdt);
       const S = this.eco.site, good = this.eco.currentGood();
-      this.world.updateSite({ working: S.state === 'work' && this.eco.placed < this.eco.total, frac: S.placeT / SITE_PLACE[S.level - 1], stock: S.inv, good }, gdt);
+      this.world.updateSite({ working: S.state === 'work' && this.eco.placed < this.eco.total, frac: S.placeT / SITE_PLACE[S.level - 1], stock: S.inv, good,
+        tier: this.eco.currentTier(), ramp: this.eco.rampLevel(), state: S.state }, gdt);
     }
     if (!menu) {
       this.world.update(dt, this.state === 'play' ? gdt : (this.state === 'pause' ? 0 : dt));

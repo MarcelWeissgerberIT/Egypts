@@ -225,3 +225,13 @@ img { -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .carriers .road { position: relative; display: flex; align-items: center; margin: 0 4px; }
 .carriers .road.bad { animation: pulse .45s infinite alternate; }
 .carriers .road .nox { position: absolute; right: -6px; bottom: -4px; filter: drop-shadow(0 0 4px rgba(255,40,90,1)) hue-rotate(-40deg) saturate(3); }
+#roadUndo { width: 54px; height: 54px; align-self: center; }
+#roadUndo.off { filter: grayscale(.85) brightness(.6); pointer-events: none; }
+#roadCost { position: absolute; z-index: 32; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; padding: 4px 12px 4px 6px; border-radius: 20px; pointer-events: none;
+  background: linear-gradient(180deg, rgba(58,20,98,.95), rgba(24,6,44,.96)); border: 2px solid #7dffb0; box-shadow: 0 0 14px rgba(120,255,170,.6); }
+#roadCost.bad { border-color: #ff6a9a; box-shadow: 0 0 14px rgba(255,60,120,.8); animation: pulse .3s infinite alternate; }
+#roadCost.hidden { display: none; }
+.rampbar { display: flex; align-items: center; gap: 6px; width: 92%; padding: 3px 8px; border-radius: 14px; background: rgba(20,4,40,.6); border: 1px solid rgba(230,181,74,.4); }
+.rampbar.on { border-color: #ffb36b; box-shadow: 0 0 10px rgba(255,170,90,.6); }
+.rampbar .pbar { height: 12px; }
+.rampbar .pfill { background: linear-gradient(180deg, #e6a878, #a0603a); }

@@ -164,3 +164,41 @@ export function riverPolyline(from, quay) {
   const w = (u, v) => ({ x: (u - v) / Math.SQRT2, z: (-u - v) / Math.SQRT2 });
   return [w(a.u, RIVER.far + 0.15), w((a.u + b.u) / 2, RIVER.mid), w(b.u, RIVER.near + 0.35)];
 }
+
+// Route for a drag gesture: cheapest road from any start tile to any target tile.
+// New tiles cost their price, existing roads of the type are almost free, turns cost a little
+// extra so routes come out straight like a surveyor's line. Returns tile indices or null.
+export function planRoute(grid, starts, targets, type) {
+  const n = SIZE * SIZE;
+  const INF = 1e9;
+  const cost = new Float32Array(n * 4).fill(INF), prev = new Int32Array(n * 4).fill(-1);
+  const tset = new Set(targets);
+  const ok = (i) => !grid.blocked[i] || grid.road[i] > 0;
+  const step = (i) => (grid.road[i] >= type ? 0.05 : ROAD_COST[type] - (grid.road[i] ? ROAD_COST[grid.road[i]] : 0) * 0.9);
+  // binary heap of [cost, state]
+  const heap = [];
+  const push = (c, s) => { heap.push([c, s]); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+  for (const i of starts) if (ok(i)) for (let d = 0; d < 4; d++) { const s = i * 4 + d; const c = step(i); if (c < cost[s]) { cost[s] = c; push(c, s); } }
+  while (heap.length) {
+    const [c, s] = pop();
+    if (c > cost[s]) continue;
+    const i = s >> 2, d = s & 3;
+    if (tset.has(i)) {
+      const out = [];
+      for (let k = s; k >= 0; k = prev[k]) out.push(k >> 2);
+      return out.reverse();
+    }
+    const x = tileX(i), z = tileZ(i);
+    for (let nd = 0; nd < 4; nd++) {
+      const nx = x + DIRS[nd][0], nz = z + DIRS[nd][1];
+      if (!inIsland(nx, nz)) continue;
+      const j = idx(nx, nz);
+      if (!ok(j)) continue;
+      const nc = c + step(j) + (nd !== d ? 0.35 : 0);
+      const ns = j * 4 + nd;
+      if (nc < cost[ns]) { cost[ns] = nc; prev[ns] = s; push(nc, ns); }
+    }
+  }
+  return null;
+}

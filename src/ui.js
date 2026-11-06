@@ -20,7 +20,7 @@ function button(id, img, cls = '') { return el('div', { id, class: 'btn ' + cls,
 const ico = (k, h, cls = '') => `<img class="${cls}" src="${U(k)}" style="height:${h}px">`;
 const arrow = '<div class="arrow"></div>';
 
-export const RES_KEYS = ['worker', 'bread', 'grain', 'stone', 'block', 'ore', 'tools', 'granite'];
+export const RES_KEYS = ['worker', 'bread', 'grain', 'stone', 'block', 'ore', 'tools', 'granite', 'brick'];
 
 export class UI {
   constructor(app) {
@@ -85,8 +85,12 @@ export class UI {
     this.roadTools = { path: tool('path', 't_path', 1), track: tool('track', 't_track', 3), erase: tool('erase', 'btn_erase', 0) };
     this.roadDone = button('roadDone', 'btn_close');
     this._bindTap(this.roadDone, 'roadDone');
-    this.roadBar.append(this.roadTools.path, this.roadTools.track, this.roadTools.erase, this.roadDone);
+    this.roadUndo = button('roadUndo', 'btn_undo');
+    this._bindTap(this.roadUndo, 'roadUndo');
+    this.roadBar.append(this.roadTools.path, this.roadTools.track, this.roadTools.erase, this.roadUndo, this.roadDone);
     app.append(this.roadBar);
+    this.roadCost = el('div', { id: 'roadCost', class: 'hidden' });
+    app.append(this.roadCost);
 
     // ---------------- sheet (build menu / building info)
     this.sheet = el('div', { id: 'sheet', class: 'hidden' }, `<div class="sheetBody"></div>`);
@@ -283,7 +287,8 @@ export class UI {
     this.sheetBody.innerHTML = `<div class="binfo"><div class="bleft"><img class="bimg big" src="${U('icon_pyramid')}" style="padding:10%">${status}</div>
       <div class="bright"><div class="pips">${pips}</div>
       <div class="recipe big">${ico('r_' + info.need, 34)}${arrow}${ico('icon_pyramid', 34)}<div class="sep"></div>${ico('icon_sun', 24)}<div class="digits">${digitsHTML(info.secs, 18)}</div></div>
-      <div class="stock"><div class="cost">${ico('r_block', 20)}<div class="digits">${digitsHTML(info.block, 15)}</div></div>${info.granite !== null ? `<div class="cost">${ico('r_granite', 20)}<div class="digits">${digitsHTML(info.granite, 15)}</div></div>` : ''}</div>
+      <div class="stock"><div class="cost">${ico('r_block', 20)}<div class="digits">${digitsHTML(info.block, 15)}</div></div>${info.granite !== null ? `<div class="cost">${ico('r_granite', 20)}<div class="digits">${digitsHTML(info.granite, 15)}</div></div>` : ''}${info.brick !== null ? `<div class="cost">${ico('r_brick', 20)}<div class="digits">${digitsHTML(info.brick, 15)}</div></div>` : ''}</div>
+      ${info.ramp ? `<div class="rampbar${info.ramp.active ? ' on' : ''}">${ico('r_brick', 26)}<div class="pbar"><div class="pfill" style="width:${Math.round(info.ramp.laid / info.ramp.need * 100)}%"></div></div><div class="digits">${digitsHTML(info.ramp.need, 14)}</div></div>` : ''}
       <div class="actions">${up}</div></div></div>`;
     const ub = this.sheetBody.querySelector('#btnUpgrade');
     if (ub) this._bindTap(ub, 'upgrade');
@@ -297,6 +302,16 @@ export class UI {
     this.controls.classList.add('under');
     for (const [k, t] of Object.entries(this.roadTools)) t.classList.toggle('sel', k === tool);
   }
+  setUndo(on) { this.roadUndo.classList.toggle('off', !on); }
+  showRoadCost(x, y, price, ok) {
+    const h = `${ico('r_deben', 26)}<div class="digits">${digitsHTML(price, 22)}</div>`;
+    if (this._set('roadCost', h)) this.roadCost.innerHTML = h;
+    this.roadCost.classList.remove('hidden');
+    this.roadCost.classList.toggle('bad', !ok);
+    this.roadCost.style.left = Math.max(50, Math.min(window.innerWidth - 50, x)) + 'px';
+    this.roadCost.style.top = Math.max(60, y - 86) + 'px';
+  }
+  hideRoadCost() { this.roadCost.classList.add('hidden'); }
   hideRoadBar() { this.roadBar.classList.add('hidden'); if (!this.sheetOpen) this.controls.classList.remove('under'); }
   flashRoadCost(tool) { const t = this.roadTools[tool]; if (!t) return; t.classList.remove('shake'); void t.offsetWidth; t.classList.add('shake'); }
 

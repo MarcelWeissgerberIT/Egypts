@@ -5,7 +5,7 @@ import { LEVELS, tierSizes } from '../src/levels.js';
 import { PLOTS } from '../src/map.js';
 import { Economy, DEFS, cycleOf, OUT_CAP, HEAVY, goodOf, PATH, TRACK } from '../src/economy.js';
 
-const PARTNER = { quarry: ['mason'], mason: ['quarry', 'site'], farm: ['bakery'], bakery: ['farm', 'house'], mine: ['smithy'], smithy: ['mine', 'quarry'], quay: ['site'], house: ['bakery'] };
+const PARTNER = { quarry: ['mason'], mason: ['quarry', 'site'], farm: ['bakery'], bakery: ['farm', 'house'], brickworks: ['farm', 'site'], mine: ['smithy'], smithy: ['mine', 'quarry'], quay: ['site'], house: ['bakery'] };
 
 function bot(E) {
   const L = E.L;
@@ -46,7 +46,7 @@ function bot(E) {
   }
   for (const n of [...E.buildings, E.site]) {
     if (!n.built) continue;
-    const needs = n.type === 'site' ? [E.currentGood()] : n.type === 'house' ? ['bread'] : (DEFS[n.type].in || []).map(([g]) => g);
+    const needs = n.type === 'site' ? [E.currentGood(), ...(L.bricks ? ['brick'] : [])] : n.type === 'house' ? ['bread'] : (DEFS[n.type].in || []).map(([g]) => g);
     for (const g of needs) {
       if (n.type === 'quay') continue; // granite arrives by boat
       const prods = E.buildings.filter((b) => b !== n && b.built && goodOf(b.type) === g && !(b.type === 'granite' && n.type === 'site'));
@@ -67,6 +67,12 @@ function bot(E) {
   if (L.tools) {
     const toolNeed = rate('quarry') / 4, tools = rate('smithy') * 2;
     if (tools < toolNeed * 1.1) { if (rate('mine') < rate('smithy') + 0.02) { if (grow('mine')) return; } else if (grow('smithy')) return; return; }
+  }
+  if (L.bricks) {
+    if (!has('brickworks').length) { grow('brickworks'); return; }
+    const grainNeed = rate('bakery') + rate('brickworks');
+    if (rate('farm') < grainNeed) { if (grow('farm')) return; }
+    if (E.site.state === 'missing' && E.site.missing === 'brick' && rate('brickworks') < 0.3) { if (grow('brickworks')) return; }
   }
   if (L.graniteTiers && E.placed > E.total * 0.15) {
     if (!has('quay').length) { grow('quay'); return; }

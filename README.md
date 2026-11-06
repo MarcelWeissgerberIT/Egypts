@@ -18,11 +18,16 @@ Mine nur auf Kupfer, ein Feld nur auf Nilschlamm. Werkstätten und Häuser stehe
 Waren bewegen sich **nur über Wege, die du Kachel für Kachel baust**:
 
 * **Wege-Knopf** (unten links) öffnet den Wegebau: ein Raster zeigt jede baubare Kachel.
-  * **Pfad** (1 Deben/Kachel): für leichte Waren (Getreide, Brot, Erz, Werkzeug).
-  * **Schlittenbahn** (3 Deben/Kachel, nasser Lehm mit Holzschwellen): für Rohstein, Quader und
-    Granit, und natürlich auch für leichte Waren. Ein Pfad lässt sich zur Schlittenbahn ausbauen.
-  * **Abriss**: Kachel entfernen (halbe Kosten zurück).
-  * Mit **einem Finger ziehen** malt Kacheln, **zwei Finger** verschieben und zoomen die Kamera.
+  * **Ziehen statt Kacheln tippen** (wie in Pocket City, Mini Motorways oder Die Siedler): Finger auf
+    einen Betrieb (oder eine Kachel) setzen und zum Ziel ziehen. Die Strecke wird automatisch geplant
+    (gerade, um Hindernisse herum, vorhandene Wege werden mitbenutzt) und **grün mit Preis**
+    angezeigt; rot heißt zu teuer. **Loslassen baut** die ganze Strecke, ein Tipp setzt eine Kachel.
+  * **Pfad** (1 Deben/Kachel): für leichte Waren (Getreide, Brot, Ziegel, Erz, Werkzeug).
+  * **Schlittenbahn** (3 Deben/Kachel, nasser Lehm mit Holzschwellen und Ziegelkante): für Rohstein,
+    Quader und Granit. Wer an Steinbruch, Steinmetz oder Baustelle ansetzt, bekommt sie automatisch.
+  * **Abriss**: über Kacheln wischen (halbe Kosten zurück). **Zurück-Knopf** macht den letzten Bau
+    oder Abriss rückgängig.
+  * **Zwei Finger** verschieben und zoomen die Kamera, so malt man nie aus Versehen beim Scrollen.
 * Ein Weg muss die Kante eines Betriebs (bzw. den Steinplatz am Rampenfuß) berühren. Längere Wege
   kosten mehr und machen die Träger langsamer.
 * Jeder Betrieb hat eigene **Träger**: Sie holen die Ware vom Stapel neben dem Betrieb und bringen
@@ -33,19 +38,28 @@ Waren bewegen sich **nur über Wege, die du Kachel für Kachel baust**:
 * Fehlt die Verbindung, zeigt der Betrieb eine Sprechblase mit Pfad oder Schlittenbahn.
 
 Ketten: Steinbruch → Steinmetz → Baustelle · Feld → Bäckerei → Arbeiterhäuser (gemeinsame
-Vorratskammer) · Kupfermine → Schmiede → Steinbruch (ab Level 3) · Granitbruch → Nilboot → Kai
-→ Baustelle (obere Stufen ab Level 4).
+Vorratskammer) · Feld → **Ziegelei** → Baustelle (Rampe, ab Level 2) · Kupfermine → Schmiede →
+Steinbruch (ab Level 3) · Granitbruch → Nilboot → Kai → Baustelle (obere Stufen ab Level 4).
+
+**Rampenbau (ab Level 2):** Bevor eine neue Stufe gelegt werden kann, muss die Rampe mit
+Lehmziegeln erhöht werden (6, 8, 10 … Ziegel). Die Ziegelei macht aus Nilschlamm und dem Stroh der
+Ernte Ziegel und konkurriert dabei mit der Bäckerei ums Getreide. Ziegelträger schleppen die Ziegel
+die Rampe hinauf, der Rampenbalken im Baustellenfenster zeigt den Fortschritt, eine Sprechblase
+über dem Steinplatz zeigt, was fehlt.
 
 Level 1 führt mit einer Hand durch alles: Vorkommen erschließen, Steinmetz bauen, Wegebau öffnen,
 Schlittenbahn wählen, die golden pulsierende Wegvorlage nachmalen, später Feld, Bäckerei und
 Pfade für das Brot.
 
-Die **Baustelle** ist echt animiert: Eine Lehmziegel-Rampe wächst mit jeder Stufe, ein
-Schlittentrupp schiebt die Quader hinauf, ein Wasserträger nässt die Bahn, oben setzen Arbeiter
-die Blöcke mit Hebeln, auf dem Steinplatz stapelt sich der Vorrat und ein Aufseher gibt Kommandos.
+Die **Baustelle** ist echt animiert: Zwei Seilzieher lehnen sich in die Seile, ein dritter schiebt
+den Schlitten mit dem Quader die Rampe hinauf, ein Wasserträger nässt die Bahn, zwei Setzer laufen
+zum Platz des Steins und hebeln ihn ein, der Quader gleitet auf Rollen über die Stufe. Auf dem
+Steinplatz behauen Steinmetze die wartenden Blöcke, Ziegelträger bauen die Rampe weiter, Pflöcke
+und Messschnüre stecken die aktuelle Stufe ab, ein Aufseher gibt Kommandos.
 In den **Betrieben** arbeiten Meshy-Figuren mit eigenen Animationen und Werkzeugen (Hämmern,
-Meißeln, Hacken, Ernten mit der Sichel, Brot einlegen); beim Schlag fliegen Splitter, die fertige
-Ware stapelt sich sichtbar neben dem Betrieb.
+Meißeln, Hacken, Ernten mit der Sichel, Brot einlegen, Ziegel formen); beim Schlag fliegen
+Splitter, in der Schmiede glüht die Esse. Ein Läufer trägt jedes fertige Stück zum Stapel neben dem
+Betrieb, angelieferte Rohstoffe liegen sichtbar vor den Werkstätten.
 
 Herausforderung: Regierungszeit des Pharaos (Sonnenleiste), Hunger-Streiks ohne Brot, Nilflut
 über den Feldern, Sandstürme in Level 5. Horusaugen: 3 bei höchstens 75 % der Zeit, 2 bei 90 %.

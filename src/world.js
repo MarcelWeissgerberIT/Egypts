@@ -26,7 +26,9 @@ const JOBS = {
   granite: [{ o: [1.05, 1.05], anim: 'Hammer', prop: 'mallet' }, { o: [-1.1, 1.0], anim: 'Chop', prop: 'chisel' }],
   quay: [{ o: [1.05, 1.05], anim: 'Pick' }],
   house: [{ o: [1.05, 1.05], anim: 'Talk' }],
+  brickworks: [{ o: [1.05, 1.05], anim: 'Place' }],
 };
+const IN_PILE = [-1.12, 1.0];  // incoming raw material (left corner)
 const PILE = [1.15, -1.0];    // where a building stacks its finished goods (right corner)
 // how fast the labourer's walk cycle covers ground at time scale 1 (world units per second)
 const WALK_NATURAL = 0.62, PUSH_NATURAL = 0.45, CARRY_NATURAL = 0.55;
@@ -80,8 +82,12 @@ class Actor {
   }
   stopAll() { this.mixer.stopAllAction(); this.current = null; this.onceAction = null; this.after = null; }
   setSpeed(k) { if (this.current) this.current.setEffectiveTimeScale(k); }
-  update(dt) { this.mixer.update(dt); }
+  update(dt) {
+    this.mixer.update(dt);
+    if (this.lean && this.spine) this.spine.quaternion.multiply(LEANQ.setFromAxisAngle(XAXIS, this.lean));
+  }
 }
+const LEANQ = new THREE.Quaternion(), XAXIS = new THREE.Vector3(1, 0, 0);
 
 export class World {
   constructor(canvas, assets) {
@@ -507,7 +513,7 @@ export class World {
     for (const k of Object.keys(this.workerClips)) if (!this.workerClips[k]) this.workerClips[k] = this.workerClips.Idle;
     this._mkWorker = () => {
       const w = mk(lp ? 'worker_lp' : 'worker', WORKER_H, this.workerClips);
-      w.rh = w.root.getObjectByName('RightHand'); w.rf = w.root.getObjectByName('RightForeArm');
+      w.rh = w.root.getObjectByName('RightHand'); w.rf = w.root.getObjectByName('RightForeArm'); w.spine = w.root.getObjectByName('Spine01');
       return w;
     };
     this.workerPool = [];
@@ -517,7 +523,7 @@ export class World {
   _getWorker() {
     const w = this.workerPool.pop() || this._mkWorker();
     w.stopAll();
-    w.group.visible = true; w.active = true; w.prop = null;
+    w.group.visible = true; w.active = true; w.prop = null; w.lean = 0;
     w.group.rotation.set(0, 0, 0); w.group.position.set(0, 0, 0);
     w.play('Idle', { fade: 0 });
     return w;
@@ -580,20 +586,26 @@ export class World {
       for (let i = 0; i < 6; i++) { c.fillStyle = 'rgba(120,90,60,0.25)'; const x = rnd() * w, y = rnd() * w; c.beginPath(); c.ellipse(x, y, 4, 7, 0.3, 0, 6.3); c.fill(); c.beginPath(); c.ellipse(x + 9, y + 12, 4, 7, 0.3, 0, 6.3); c.fill(); }
     });
     const clayTex = mk((c, w) => {
-      c.fillStyle = '#8a5634'; c.fillRect(0, 0, w, w);
+      c.fillStyle = '#7d4a2c'; c.fillRect(0, 0, w, w);
       for (let i = 0; i < 300; i++) { const g = 90 + rnd() * 60; c.fillStyle = `rgba(${g + 40},${g},${g - 30},${0.2 + rnd() * 0.3})`; c.fillRect(rnd() * w, rnd() * w, 2 + rnd() * 4, 1 + rnd() * 3); }
-      for (let i = 0; i < 5; i++) { c.fillStyle = 'rgba(170,190,230,0.35)'; c.beginPath(); c.ellipse(rnd() * w, rnd() * w, 6 + rnd() * 10, 3 + rnd() * 4, rnd() * 3, 0, 6.3); c.fill(); }
+      for (let i = 0; i < 40; i++) { c.strokeStyle = 'rgba(60,30,15,0.35)'; c.lineWidth = 1 + rnd() * 2; c.beginPath(); const x0 = rnd() * w, y0 = rnd() * w; c.moveTo(x0, y0); c.lineTo(x0 + (rnd() - 0.5) * 30, y0 + (rnd() - 0.5) * 8); c.stroke(); }
     });
     this.roadMats = {
       pathEdge: new THREE.MeshStandardMaterial({ color: 0x8a5f36, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
       path: new THREE.MeshStandardMaterial({ map: pathTex, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
       trackEdge: new THREE.MeshStandardMaterial({ color: 0x5a3420, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
-      track: new THREE.MeshStandardMaterial({ map: clayTex, roughness: 0.45, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+      track: new THREE.MeshStandardMaterial({ map: clayTex, roughness: 0.32, metalness: 0.08, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     };
     this.roadGroup = new THREE.Group();
     this.scene.add(this.roadGroup);
-    this.sleeperGeo = new THREE.BoxGeometry(0.085, 0.04, 0.6);
-    this.sleeperMat = new THREE.MeshStandardMaterial({ color: 0x7a4a24, roughness: 0.85 });
+    this.sleeperGeo = new THREE.BoxGeometry(0.09, 0.035, 0.66);
+    this.sleeperMat = new THREE.MeshStandardMaterial({ color: 0x80522c, roughness: 0.85 });
+    this.kerbGeo = new THREE.BoxGeometry(0.4, 0.06, 0.07);
+    this.kerbMat = new THREE.MeshStandardMaterial({ map: this._tex('mudbrick', 1), color: 0xb78a62, roughness: 0.95 });
+    this.stoneGeo = new THREE.DodecahedronGeometry(0.055, 0);
+    this.stoneMat = new THREE.MeshStandardMaterial({ color: 0xc9b08a, roughness: 0.9, flatShading: true });
+    this.puddleGeo = new THREE.CircleGeometry(0.1, 12).rotateX(-Math.PI / 2);
+    this.puddleMat = new THREE.MeshStandardMaterial({ color: 0x6a7fb8, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.75 });
     this.sleepers = null;
     this.roadVersion = -1;
     // ghost tiles: suggested road (tutorial) and the road-mode grid
@@ -605,6 +617,10 @@ export class World {
     this.ghost = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.92, 0.92).rotateX(-Math.PI / 2), this.ghostMat, SIZE * 2);
     this.ghost.count = 0; this.ghost.renderOrder = 5; this.ghost.frustumCulled = false;
     this.scene.add(this.ghost);
+    this.previewMat = new THREE.MeshBasicMaterial({ map: ghostTex, transparent: true, depthWrite: false, color: 0x9dffc4 });
+    this.preview = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2), this.previewMat, SIZE * 3);
+    this.preview.count = 0; this.preview.renderOrder = 6; this.preview.frustumCulled = false;
+    this.scene.add(this.preview);
     this.gridMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: 0 });
     this.gridPlane = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE).rotateX(-Math.PI / 2), this.gridMat);
     this.gridPlane.position.y = 0.02; this.gridPlane.renderOrder = 4; this.gridPlane.visible = false;
@@ -620,62 +636,119 @@ export class World {
     this.roadVersion = key;
     this.roadGroup.clear();
     const at = (x, z) => (x < -N || x > N || z < -N || z > N ? 0 : G.road[(x + N) * SIZE + (z + N)]);
+    const hash = (x, z, k = 0) => { const h = Math.sin(x * 127.1 + z * 311.7 + k * 74.7) * 43758.5453; return h - Math.floor(h); };
     // footprints of finished buildings and the plaza: roads reach into them with a short stub
-    const into = new Map();
-    const mark = (cx, cz) => { for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) into.set((cx + dx) + ',' + (cz + dz), true); };
+    const into = new Set();
+    const mark = (cx, cz) => { for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) into.add((cx + dx) + ',' + (cz + dz)); };
     for (const b of eco.buildings) if (b.built) mark(b.x, b.z);
     mark(eco.site.x, eco.site.z);
-    const quads = { path: [], pathEdge: [], track: [], trackEdge: [] };
-    const sleepers = [];
-    const rect = (list, x0, z0, x1, z1, y) => list.push([x0, z0, x1, z1, y]);
-    const W = { path: 0.62, pathEdge: 0.78, track: 0.7, trackEdge: 0.86 };
+    // rounded road shape: a disc on every tile, joined to its neighbours by straight bands
+    const tris = { path: [], pathEdge: [], track: [], trackEdge: [] };
+    const W = { path: 0.56, pathEdge: 0.72, track: 0.74, trackEdge: 0.9 };
+    const Y = { path: 0.034, pathEdge: 0.026, track: 0.034, trackEdge: 0.026 };
+    const quad = (L, ax, az, bx, bz, cx, cz, dx, dz) => { const y = Y[L]; tris[L].push(ax, y, az, cx, y, cz, dx, y, dz, ax, y, az, bx, y, bz, cx, y, cz); };
+    const disc = (L, x, z) => {
+      const r = W[L] / 2, y = Y[L], n = 14;
+      for (let k = 0; k < n; k++) {
+        const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2;
+        tris[L].push(x, y, z, x + Math.cos(a1) * r, y, z + Math.sin(a1) * r, x + Math.cos(a0) * r, y, z + Math.sin(a0) * r);
+      }
+    };
+    const band = (L, x, z, dx, dz, len) => {
+      const w = W[L] / 2, ex = x + dx * len, ez = z + dz * len, px = -dz * w, pz = dx * w;
+      quad(L, x + px, z + pz, ex + px, ez + pz, ex - px, ez - pz, x - px, z - pz);
+    };
+    const sleepers = [], stones = [], kerbs = [], puddles = [];
+    const halo = [];
     for (let x = -N; x <= N; x++) for (let z = -N; z <= N; z++) {
       const t = at(x, z);
       if (!t) continue;
       const kind = t === 2 ? 'track' : 'path';
-      for (const layer of [kind + 'Edge', kind]) {
-        const w = W[layer] / 2, y = layer.endsWith('Edge') ? 0.026 : 0.032;
-        rect(quads[layer], x - w, z - w, x + w, z + w, y);
-        // arms towards +x / +z neighbours (each joint drawn once) and stubs into buildings
-        for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
-          const n = at(x + dx, z + dz);
-          const stub = into.has((x + dx) + ',' + (z + dz));
-          if (!(n && (dx > 0 || dz > 0)) && !stub) continue;
-          const both = n ? Math.min(n, t) : t;
-          const lay = both === 2 ? layer : layer.replace('track', 'path');
-          const ww = W[lay] / 2, len = n ? 1 : 0.85;
-          if (dx) rect(quads[lay], Math.min(x, x + dx * len), z - ww, Math.max(x, x + dx * len), z + ww, y);
-          else rect(quads[lay], x - ww, Math.min(z, z + dz * len), x + ww, Math.max(z, z + dz * len), y);
-          if (both === 2 && !layer.endsWith('Edge')) for (let k = 0.25; k < len - 0.05; k += 0.5) sleepers.push([x + dx * k, z + dz * k, dx ? 0 : Math.PI / 2]);
-        }
-        if (t === 2 && !layer.endsWith('Edge')) {
-          // straight runs get sleepers through the tile centre too
-          const ex = at(x + 1, z) === 2 || at(x - 1, z) === 2, ez = at(x, z + 1) === 2 || at(x, z - 1) === 2;
-          if (ex !== ez || (!ex && !ez)) sleepers.push([x, z, ez ? Math.PI / 2 : 0]);
+      disc(kind + 'Edge', x, z); disc(kind, x, z);
+      halo.push([x, z, t]);
+      let straightX = 0, straightZ = 0;
+      for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+        const n = at(x + dx, z + dz);
+        const stub = !n && into.has((x + dx) + ',' + (z + dz));
+        if (n) { if (dx) straightX++; else straightZ++; }
+        if (!(n && (dx > 0 || dz > 0)) && !stub) continue;
+        const both = n ? Math.min(n, t) : t;
+        const k2 = both === 2 ? 'track' : 'path';
+        const len = n ? 1 : 0.8;
+        band(k2 + 'Edge', x, z, dx, dz, len); band(k2, x, z, dx, dz, len);
+        if (n) halo.push([x + dx * 0.5, z + dz * 0.5, both]);
+        // details between the two discs
+        const r = W[k2] / 2;
+        const from = 0.3, to = n ? 0.7 : len - 0.05;
+        if (both === 2) {
+          for (let k = 0.2; k <= len - 0.12; k += 0.3) sleepers.push([x + dx * k, z + dz * k, dx ? 0 : Math.PI / 2, hash(x, z, k)]);
+          for (const sgn of [-1, 1]) kerbs.push([x + dx * (from + to) / 2 - dz * sgn * (r + 0.02), z + dz * (from + to) / 2 + dx * sgn * (r + 0.02), dx ? 0 : Math.PI / 2, to - from]);
+        } else {
+          for (let k = from; k <= to; k += 0.2) for (const sgn of [-1, 1]) {
+            if (hash(x * 3 + dx, z * 3 + dz, k * 10 + sgn) < 0.3) continue;
+            stones.push([x + dx * k - dz * sgn * (r + 0.03), z + dz * k + dx * sgn * (r + 0.03), hash(x, z, k + sgn * 7)]);
+          }
         }
       }
+      if (t === 2 && ((straightX && !straightZ) || (straightZ && !straightX) || (!straightX && !straightZ))) {
+        sleepers.push([x, z, straightZ ? Math.PI / 2 : 0, hash(x, z, 9)]);
+      }
+      if (t === 2 && hash(x, z, 3) < 0.35) puddles.push([x + (hash(x, z, 4) - 0.5) * 0.3, z + (hash(x, z, 5) - 0.5) * 0.3, 0.08 + hash(x, z, 6) * 0.08]);
     }
-    for (const [layer, list] of Object.entries(quads)) {
+    for (const [layer, list] of Object.entries(tris)) {
       if (!list.length) continue;
-      const pos = [], uvs = [], nor = [];
-      for (const [x0, z0, x1, z1, y] of list) {
-        const P = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
-        for (const k of [0, 3, 2, 0, 2, 1]) { pos.push(P[k][0], y, P[k][1]); uvs.push(P[k][0] * 0.5, P[k][1] * 0.5); nor.push(0, 1, 0); }
-      }
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-      g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      g.setAttribute('position', new THREE.Float32BufferAttribute(list, 3));
+      const uvs = new Float32Array(list.length / 3 * 2);
+      for (let i = 0, j = 0; i < list.length; i += 3, j += 2) { uvs[j] = list[i] * 0.5; uvs[j + 1] = list[i + 2] * 0.5; }
+      g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      const nor = new Float32Array(list.length); for (let i = 1; i < nor.length; i += 3) nor[i] = 1;
+      g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
       const m = new THREE.Mesh(g, this.roadMats[layer]);
       m.receiveShadow = true;
       this.roadGroup.add(m);
     }
-    if (sleepers.length) {
-      const im = new THREE.InstancedMesh(this.sleeperGeo, this.sleeperMat, sleepers.length);
-      sleepers.forEach(([x, z, r], i) => { tmpM.compose(tmpV.set(x, 0.045, z), tmpQ.setFromAxisAngle(UP, r), tmpS.set(1, 1, 1)); im.setMatrixAt(i, tmpM); });
-      im.receiveShadow = true; im.castShadow = false;
+    const inst = (geo, mat, list, set) => {
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((e, i) => set(im, e, i));
+      im.receiveShadow = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
       this.roadGroup.add(im);
+    };
+    const col = new THREE.Color();
+    inst(this.sleeperGeo, this.sleeperMat, sleepers, (im, [x, z, r, h], i) => {
+      tmpM.compose(tmpV.set(x, 0.042, z), tmpQ.setFromAxisAngle(UP, r + (h - 0.5) * 0.12), tmpS.set(1, 1, 0.92 + h * 0.16)); im.setMatrixAt(i, tmpM);
+      im.setColorAt(i, col.setRGB(0.85 + h * 0.3, 0.8 + h * 0.25, 0.78 + h * 0.2));
+    });
+    inst(this.kerbGeo, this.kerbMat, kerbs, (im, [x, z, r, len], i) => { tmpM.compose(tmpV.set(x, 0.04, z), tmpQ.setFromAxisAngle(UP, r), tmpS.set(len / 0.4, 1, 1)); im.setMatrixAt(i, tmpM); });
+    inst(this.stoneGeo, this.stoneMat, stones, (im, [x, z, h], i) => {
+      tmpM.compose(tmpV.set(x, 0.035, z), tmpQ.setFromEuler(new THREE.Euler(h * 3, h * 7, h * 5)), tmpS.set(0.8 + h * 0.7, 0.5 + h * 0.4, 0.8 + h * 0.6)); im.setMatrixAt(i, tmpM);
+      im.setColorAt(i, col.setRGB(0.85 + h * 0.15, 0.78 + h * 0.15, 0.68 + h * 0.15));
+    });
+    inst(this.puddleGeo, this.puddleMat, puddles, (im, [x, z, r], i) => { tmpM.compose(tmpV.set(x, 0.037, z), tmpQ.identity(), tmpS.set(r / 0.1, 1, r / 0.14)); im.setMatrixAt(i, tmpM); });
+    // a soft worn halo of trampled sand around all roads
+    this._drawHalo(halo);
+  }
+
+  _drawHalo(list) {
+    const px = 1024 / SIZE;
+    if (!this.haloCanvas) {
+      this.haloCanvas = document.createElement('canvas'); this.haloCanvas.width = this.haloCanvas.height = 1024;
+      this.haloTex = new THREE.CanvasTexture(this.haloCanvas); this.haloTex.colorSpace = THREE.SRGBColorSpace;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: this.haloTex, transparent: true, depthWrite: false }));
+      m.position.y = 0.012; m.renderOrder = 1;
+      this.scene.add(m);
     }
+    const c = this.haloCanvas.getContext('2d');
+    c.clearRect(0, 0, 1024, 1024);
+    for (const [x, z, t] of list) {
+      const cx = (x + N + 0.5) * px, cy = (z + N + 0.5) * px, r = px * (t === 2 ? 1.05 : 0.85);
+      const g = c.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, t === 2 ? 'rgba(110,70,40,0.32)' : 'rgba(150,105,60,0.26)'); g.addColorStop(1, 'rgba(150,105,60,0)');
+      c.fillStyle = g; c.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+    this.haloTex.needsUpdate = true;
   }
 
   // a puff of sand where a road tile was laid or removed; red flash on a blocked tile
@@ -696,6 +769,19 @@ export class World {
     }
     this.ghost.count = n;
     this.ghost.instanceMatrix.needsUpdate = true;
+  }
+
+  // the planned route under the finger: green when affordable, red when too expensive
+  setPreview(tiles, ok = true) {
+    const n = tiles ? Math.min(tiles.length, this.preview.instanceMatrix.count) : 0;
+    for (let k = 0; k < n; k++) {
+      const i = tiles[k];
+      tmpM.compose(tmpV.set(Math.floor(i / SIZE) - N, 0.07, (i % SIZE) - N), tmpQ.identity(), tmpS.set(1, 1, 1));
+      this.preview.setMatrixAt(k, tmpM);
+    }
+    this.preview.count = n;
+    this.preview.instanceMatrix.needsUpdate = true;
+    this.previewMat.color.set(ok ? 0x9dffc4 : 0xff5c8a);
   }
 
   // road mode: faint grid on every tile a road may use
@@ -905,6 +991,58 @@ export class World {
     return { x: w.x, z: w.z };
   }
 
+  // a labourer carries each finished piece from the workplace to the pile
+  runnerTrip(b, good) {
+    const v = this.bviews.get(b.id);
+    if (!v || b.type === 'granite' || b.type === 'quay' || b.type === 'house') return;
+    if (!v.runner) {
+      v.runner = this._getWorker();
+      v.runner.load = new THREE.Group(); v.runner.load.position.set(0, 0.62, 0.28); v.runner.group.add(v.runner.load);
+      v.runner.group.position.set(b.x + PILE[0] - 0.1, 0.08, b.z + PILE[1] + 0.55);
+    }
+    v.trip = { t: 0, good };
+  }
+
+  _updateRunner(v, dt) {
+    const w = v.runner;
+    if (!w) return;
+    const b = v.b;
+    const A = { x: b.x + 0.55, z: b.z + 1.2 }, B = { x: b.x + PILE[0] - 0.1, z: b.z + PILE[1] + 0.55 };
+    const T = v.trip;
+    if (!T) {
+      this._walkTo(w, B.x, 0.08, B.z, dt, 1.3) && (w.play('Idle'), (w.group.rotation.y = Math.atan2(b.x - w.group.position.x, b.z - w.group.position.z)));
+      w.load.visible = false;
+      return;
+    }
+    T.t += dt;
+    if (T.phase === undefined) T.phase = 'fetch';
+    if (T.phase === 'fetch') { w.load.visible = false; if (this._walkTo(w, A.x, 0.08, A.z, dt, 1.8)) { T.phase = 'pick'; T.t = 0; } }
+    else if (T.phase === 'pick') { w.play('Place'); if (T.t > 0.6) { T.phase = 'carry'; this._setCargo(w.load, T.good, 1, !HEAVY_GOODS.has(T.good)); w.load.visible = true; } }
+    else if (T.phase === 'carry') {
+      if (this._walkTo(w, B.x, 0.08, B.z, dt, 1.2)) { T.phase = 'drop'; T.t = 0; }
+      else w.play('Carry');
+    } else if (T.phase === 'drop') { w.play('Place'); if (T.t > 0.5) { w.load.visible = false; v.trip = null; } }
+  }
+
+  // raw material waiting at a workshop (left corner)
+  _updateInPile(v) {
+    const b = v.b, d = b.inv || {};
+    const good = { mason: 'stone', bakery: 'grain', smithy: 'ore', quay: 'granite', brickworks: 'grain' }[b.type];
+    if (!good) return;
+    if (!v.inPile) { v.inPile = new THREE.Group(); v.inPile.position.set(b.x + IN_PILE[0], 0.03, b.z + IN_PILE[1]); this.scene.add(v.inPile); }
+    const n = Math.min(6, Math.floor(d[good] || 0));
+    if (v.inN === n) return;
+    v.inN = n;
+    v.inPile.clear();
+    for (let i = 0; i < n; i++) {
+      const m = this._cargoMesh(good), heavy = HEAVY_GOODS.has(good);
+      const lay = Math.floor(i / 3), col = i % 3;
+      m.position.set((col % 2) * 0.12 - lay * 0.05, (heavy ? 0.14 : 0.12) + lay * (heavy ? 0.28 : 0.22), (col - 1) * 0.34 * (heavy ? 1 : 0.8));
+      m.rotation.y = AZ + col * 0.3;
+      v.inPile.add(m);
+    }
+  }
+
   // pile of finished goods at a building's right corner
   _updatePile(v) {
     const b = v.b;
@@ -1018,6 +1156,13 @@ export class World {
     if (key) { v.bubble.material.map = this._bubbleTex(key); v.bubble.material.needsUpdate = true; }
   }
 
+  setSiteBubble(key) {
+    if (!this.siteBubble || this.siteBubbleKey === key) return;
+    this.siteBubbleKey = key;
+    this.siteBubble.visible = !!key;
+    if (key) { this.siteBubble.material.map = this._bubbleTex(key); this.siteBubble.material.needsUpdate = true; }
+  }
+
   buildingPos(b) { const v = this.bviews.get(b.id); return v ? v.pos : null; }
 
   // a produced good floats up out of the building
@@ -1059,6 +1204,9 @@ export class World {
         }
       }
       this._updatePile(v);
+      this._updateInPile(v);
+      this._updateRunner(v, dt * (this.gameRate ?? 1));
+      if (b.built && b.busy && b.type === 'smithy' && Math.random() < dt * 6) this.spawn('glow', v.pos.clone().add(new THREE.Vector3(0.7, 0.45, 0.7)), { life: 0.35, size: 0.5 + Math.random() * 0.3, color: 0xff8a30 });
       if (v.bump > 0) {
         v.bump = Math.max(0, v.bump - dt);
         const s = 1 + Math.sin(v.bump * 18) * v.bump * 0.18;
@@ -1233,9 +1381,10 @@ export class World {
     const base = tierSizes[0];
     this.pyrRadius = base * Math.SQRT2 / 2 + 0.6;
     this.foundation.scale.set(base + 1.1, 1, base + 1.1);
+    this.foundation.material.map.repeat.set(base + 1.1, base + 1.1);
     // ghost outline of the finished pyramid
     this.plan.clear();
-    const lineM = new THREE.LineBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.55 });
+    const lineM = new THREE.LineBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.22 });
     tierSizes.forEach((n, t) => {
       const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(n, H, n)), lineM);
       e.position.y = this.tierBaseY(t) + H / 2;
@@ -1245,7 +1394,7 @@ export class World {
     this.capToken = (this.capToken || 0) + 1;
     this.orbit = false;
     this.camGoal.az = AZ;
-    for (const v of this.bviews.values()) { this.scene.remove(v.g); if (v.pile) this.scene.remove(v.pile); for (const j of v.jobs || []) this._freeWorker(j.w); }
+    for (const v of this.bviews.values()) { this.scene.remove(v.g); if (v.pile) this.scene.remove(v.pile); if (v.inPile) this.scene.remove(v.inPile); if (v.runner) { v.runner.group.remove(v.runner.load); this._freeWorker(v.runner); } for (const j of v.jobs || []) this._freeWorker(j.w); }
     this.bviews.clear();
     for (const id of [...this.carrierViews.keys()]) this._dropCarrier(id);
     for (const pv of Object.values(this.plotViews)) pv.deposit.visible = true;
@@ -1283,7 +1432,9 @@ export class World {
     m.setMatrixAt(idx, tmpM);
     m.instanceMatrix.needsUpdate = true;
     const from = this.rampInfo ? this.rampTop() : p.clone().setY(p.y + 2.2);
-    this.anims.push({ idx, p, from, t: 0, dur: 0.55, drop: 0 });
+    const dur = 0.6 + from.distanceTo(p) * 0.16;
+    this.anims.push({ idx, p, from, t: 0, dur, drop: 0 });
+    this.setJob = { p, y: this.tierBaseY(t), until: this.time + dur };
     return p;
   }
 
@@ -1306,7 +1457,7 @@ export class World {
       // slide/lift from the ramp top over the steps into the slot
       const e = easeInOut(fall);
       tmpV.copy(an.from).lerp(an.p, e);
-      tmpV.y += Math.sin(e * Math.PI) * 0.6 - (1 - sy) * H * 0.5;
+      tmpV.y += Math.sin(e * Math.PI) * 0.18 - (1 - sy) * H * 0.5;
       tmpM.compose(tmpV, tmpQ.identity(), tmpS.set(sx, sy, sx));
       if (fall >= 1 && !an.landed) {
         an.landed = true;
@@ -1357,7 +1508,34 @@ export class World {
     this.stock = new THREE.InstancedMesh(this.blockGeo, this.blockMat, 12);
     this.stockG = new THREE.InstancedMesh(this.blockGeo, this.graniteMat, 12);
     for (const m of [this.stock, this.stockG]) { m.count = 0; m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; this.scene.add(m); }
+    this.brickGeo = new THREE.BoxGeometry(0.3, 0.1, 0.15);
+    this.brickMat = new THREE.MeshStandardMaterial({ map: this._tex('mudbrick', 1), color: 0x9a6a48, roughness: 0.95 });
+    this.bricks = new THREE.InstancedMesh(this.brickGeo, this.brickMat, 24);
+    this.bricks.count = 0; this.bricks.castShadow = true; this.bricks.frustumCulled = false; this.scene.add(this.bricks);
+    const ropeM = new THREE.LineBasicMaterial({ color: 0xe0c890 });
+    this.ropes = [0, 1].map(() => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), ropeM); l.frustumCulled = false; this.scene.add(l); return l; });
+    this.survey = new THREE.Group();
+    this.scene.add(this.survey);
     this.crew = null;
+  }
+
+  // survey stakes and cords marking the tier that is being laid
+  _surveyTier(t) {
+    if (this.surveyT === t) return;
+    this.surveyT = t;
+    this.survey.clear();
+    if (t >= this.tierSizes.length) return;
+    const n = this.tierSizes[t], h = n / 2 + 0.06, y = this.tierBaseY(t);
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.9 });
+    const pts = [];
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.4, 5), wood);
+      st.position.set(sx * h, y + 0.2, sz * h); st.castShadow = true;
+      this.survey.add(st);
+      pts.push(new THREE.Vector3(sx * h, y + 0.3, sz * h));
+    }
+    pts.push(pts[0].clone());
+    this.survey.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xf2e2b0 })));
   }
 
   _rampGeom(base, Y) {
@@ -1410,11 +1588,11 @@ export class World {
   }
 
   _siteLevel() {
-    const base = this.tierSizes[0];
     this._buildRamp(this.tierBaseY(0));
-    for (const w of this.crew ? Object.values(this.crew) : []) this._freeWorker(w);
+    if (this.crew) for (const w of Object.values(this.crew)) for (const q of [].concat(w)) this._freeWorker(q);
     if (this.crewSledge) this.scene.remove(this.crewSledge);
-    this.crew = { pusher: this._getWorker(), water: this._getWorker(), setterA: this._getWorker(), setterB: this._getWorker(), boss: this._getWorker() };
+    const W = () => this._getWorker();
+    this.crew = { pusher: W(), water: W(), setterA: W(), setterB: W(), boss: W(), pullers: [W(), W()], dressers: [W(), W()], brickers: [W(), W()] };
     this.crewSledge = this._sledge();
     const P = this.layout.plaza;
     this.plazaPos = new THREE.Vector3(P.x, 0, P.z);
@@ -1425,11 +1603,17 @@ export class World {
       this.scene.add(this.plazaMesh);
     }
     this.plazaMesh.position.set(P.x, 0.03, P.z);
-    this.crew.boss.group.position.set(P.x + 1.15, 0.08, P.z + 1.15);
-    this.crew.boss.group.rotation.y = AZ;
+    if (!this.siteBubble) { this.siteBubble = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false })); this.siteBubble.scale.set(1.15, 1.26, 1); this.siteBubble.renderOrder = 13; this.scene.add(this.siteBubble); }
+    this.siteBubble.visible = false; this.siteBubbleKey = null;
+    this.crew.boss.group.position.set(P.x + 1.2, 0.08, P.z + 1.2);
+    this.crew.boss.group.rotation.y = AZ + 2.4;
     this.crew.boss.play('Talk');
-    this._giveProp(this.crew.setterA, null);
+    // stone dressers trim the blocks on the plaza before they go up
+    this.crew.dressers.forEach((w, k) => { w.group.position.set(P.x + 0.45 - k * 1.0, 0.08, P.z + 1.5); w.group.rotation.y = Math.PI + (k ? 0.3 : -0.3); this._giveProp(w, 'chisel'); });
+    this.setJob = null;
     this.siteT = 0;
+    this.surveyT = -1;
+    this._surveyTier(0);
     this._placeSetters(0);
   }
 
@@ -1445,19 +1629,43 @@ export class World {
     this.crew.setterB.group.rotation.y = Math.PI / 2 - 0.4;
   }
 
-  setSiteTier(t) {
-    const Y = this.tierBaseY(Math.min(t, this.tierSizes.length - 1));
-    this.rampGoal = Y;
-    this._placeSetters(t);
+  setSiteTier(t) { this._placeSetters(t); this._surveyTier(t); }
+
+  // walk a labourer towards a point; returns true when there
+  _walkTo(w, x, y, z, dt, speed = 1.6) {
+    const p = w.group.position, dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
+    if (d < 0.05) { p.set(x, y, z); return true; }
+    const k = Math.min(1, (speed * dt) / d);
+    p.x += dx * k; p.z += dz * k; p.y += (y - p.y) * Math.min(1, dt * 6);
+    w.group.rotation.y = Math.atan2(dx, dz);
+    w.play('Walk'); w.setSpeed(speed / WALK_NATURAL);
+    return false;
   }
 
-  // site: { working, frac (0..1 of the current placing cycle), stock: {block, granite} }
+  // chips fly when a labourer's tool strikes (once per animation cycle)
+  _strikeFx(w, color, stone = true) {
+    const a = w.current;
+    if (!a) return;
+    const ph = (a.time / a.getClip().duration) % 1;
+    if (w.lastPh !== undefined && w.lastPh < 0.5 && ph >= 0.5) {
+      const p = w.group.position, f = new THREE.Vector3(Math.sin(w.group.rotation.y), 0, Math.cos(w.group.rotation.y));
+      const hit = new THREE.Vector3(p.x + f.x * 0.45, p.y + 0.25, p.z + f.z * 0.45);
+      for (let k = 0; k < 4; k++) this.spawn(stone ? 'dust' : 'sparkle', hit, { vel: new THREE.Vector3((Math.random() - 0.5) * 1.6, 1 + Math.random(), (Math.random() - 0.5) * 1.6), life: 0.5, size: stone ? 0.22 : 0.18, gravity: 4, opacity: 0.85, color });
+    }
+    w.lastPh = ph;
+  }
+
+  // s: { working, frac (0..1 of the current placing cycle), stock, good, tier, ramp (tiers, fractional), state }
   updateSite(s, dt) {
     if (!this.crew) return;
-    if (this.rampGoal !== undefined && Math.abs(this.rampGoal - this.rampY) > 0.01) {
-      this._buildRamp(this.rampY + Math.sign(this.rampGoal - this.rampY) * Math.min(Math.abs(this.rampGoal - this.rampY), dt * 0.8));
+    if (this.siteBubble.visible) this.siteBubble.position.set(this.plazaPos.x, 2.6 + Math.sin(this.time * 3) * 0.08, this.plazaPos.z);
+    const rampGoal = this.tierBaseY(Math.min(s.ramp ?? 0, this.tierSizes.length - 1));
+    if (Math.abs(rampGoal - this.rampY) > 0.005) {
+      this._buildRamp(this.rampY + Math.sign(rampGoal - this.rampY) * Math.min(Math.abs(rampGoal - this.rampY), dt * 0.6));
     }
+    if (s.tier !== undefined) this._surveyTier(Math.min(s.tier, this.tierSizes.length - 1));
     const c = this.crew;
+    const R = this.rampInfo;
     const f = s.working ? s.frac : 0.47;
     // 0..0.45 down empty, 0.45..0.5 load at the foot, 0.5..0.95 up loaded, 0.95..1 setting the stone
     let rp, loaded, phase;
@@ -1469,27 +1677,79 @@ export class World {
     const p = this._rampPoint(rp);
     const up = new THREE.Vector3(1, 0, 0);
     const dir = phase === 'down' ? up.clone().negate() : up;
+    const slope = Math.atan2(this.rampY, R.x1 - R.x0);
     this.crewSledge.position.copy(p);
     this.crewSledge.rotation.y = 0;
-    this.crewSledge.rotation.z = Math.atan2(this.rampY, this.rampInfo.x1 - this.rampInfo.x0);
+    this.crewSledge.rotation.z = slope;
     this._setCargo(this.crewSledge.userData.cargo, s.good || 'block', loaded ? 1 : 0);
+    this.crewSledge.userData.rope.visible = false;
     c.pusher.group.position.copy(p).addScaledVector(up, phase === 'down' ? 0.75 : -0.75);
     c.pusher.group.position.y = this._rampPoint(Math.max(0, rp - 0.07)).y;
     c.pusher.group.rotation.y = Math.atan2(dir.x, dir.z);
     c.pusher.play(phase === 'up' ? 'Push' : phase === 'down' ? 'Walk' : 'Idle');
+    // two rope haulers lean into the ropes uphill of the sledge
+    const len = R.x1 - R.x0;
+    c.pullers.forEach((w, k) => {
+      const ahead = phase === 'up' || phase === 'load' ? 1.25 + k * 0.45 : 0.9 + k * 0.4;
+      const q = this._rampPoint(THREE.MathUtils.clamp(rp + ahead / len, 0, 1));
+      const side = (k ? -1 : 1) * 0.28;
+      w.group.position.set(Math.min(q.x, R.x1 + 0.3), q.y, R.zc + side);
+      w.group.rotation.y = phase === 'down' ? -Math.PI / 2 : Math.PI / 2;
+      const hauling = phase === 'up';
+      w.lean = hauling ? 0.45 : 0;
+      w.play(phase === 'up' || phase === 'down' ? 'Walk' : 'Idle');
+      if (hauling) w.setSpeed(0.7);
+      const rope = this.ropes[k], arr = rope.geometry.attributes.position.array;
+      arr[0] = p.x + 0.5; arr[1] = p.y + 0.3; arr[2] = R.zc + side * 0.3;
+      arr[3] = w.group.position.x - 0.12; arr[4] = w.group.position.y + 0.62; arr[5] = w.group.position.z;
+      rope.geometry.attributes.position.needsUpdate = true;
+      rope.visible = hauling || phase === 'load';
+    });
     // water carrier wets the slope ahead of the sledge
-    const wp = THREE.MathUtils.clamp(phase === 'up' ? rp + 0.18 : (Math.sin(this.time * 0.5) * 0.5 + 0.5), 0, 1);
-    const wpos = this._rampPoint(wp); wpos.z += 0.45;
+    const wp = THREE.MathUtils.clamp(phase === 'up' ? rp + 0.3 : (Math.sin(this.time * 0.5) * 0.5 + 0.5), 0, 1);
+    const wpos = this._rampPoint(wp); wpos.z += 0.5;
     c.water.group.position.copy(wpos);
     c.water.group.rotation.y = Math.PI / 2;
     c.water.play(s.working ? 'Water' : 'Idle');
     if (s.working && phase === 'up' && Math.random() < dt * 4) this.spawn('glow', wpos.clone().add(new THREE.Vector3(0.4, 0.05, -0.3)), { life: 0.6, size: 0.25, color: 0x7fd8ff, vel: new THREE.Vector3(0, 0.3, 0) });
-    const setting = phase === 'set' || (phase === 'up' && rp > 0.85);
-    c.setterA.play(setting ? 'Lever' : 'Idle');
-    c.setterB.play(setting ? 'Pick' : 'Idle');
-    this._giveProp(c.setterA, null);
-    // stock pile at the foot of the ramp
+    // block setters walk to the slot of the stone being set and lever it into place
+    const J = this.setJob;
+    if (J && this.time < J.until + 1.2) {
+      const off = new THREE.Vector3(0.44, 0, 0.44);
+      const arrivedA = this._walkTo(c.setterA, J.p.x + off.x, J.y, J.p.z + off.z, dt, 2.2);
+      const arrivedB = this._walkTo(c.setterB, J.p.x + 0.62, J.y, J.p.z - 0.1, dt, 2.2);
+      if (arrivedA) { c.setterA.group.rotation.y = Math.atan2(-off.x, -off.z); c.setterA.play('Lever'); }
+      if (arrivedB) { c.setterB.group.rotation.y = -Math.PI / 2; c.setterB.play('Pick'); }
+    } else {
+      c.setterA.play('Idle'); c.setterB.play('Idle');
+    }
+    // stone dressers trim waiting blocks on the plaza
     const P = this.plazaPos;
+    c.dressers.forEach((w) => { const work = (s.stock.block || 0) + (s.stock.granite || 0) > 0; w.play(work ? 'Chop' : 'Idle'); if (work) this._strikeFx(w, 0xfff2dc); });
+    // mud bricks: stacked at the ramp foot, carried up and laid while the ramp is raised
+    const nb = Math.min(24, s.stock.brick || 0);
+    this.bricks.count = nb;
+    for (let i = 0; i < nb; i++) {
+      const lay = Math.floor(i / 6), k = i % 6;
+      tmpM.compose(tmpV.set(R.x0 + 0.25 + (k % 3) * 0.32, 0.1 + lay * 0.105, R.z1 + 0.2 + Math.floor(k / 3) * 0.17), tmpQ.identity(), tmpS.set(1, 1, 1));
+      this.bricks.setMatrixAt(i, tmpM);
+    }
+    this.bricks.instanceMatrix.needsUpdate = true;
+    c.brickers.forEach((w, k) => {
+      if (s.state === 'ramp') {
+        const T = 5.5, ph = ((this.time / T) + k * 0.5) % 1;
+        const goingUp = ph < 0.5, q = goingUp ? ph * 2 : (1 - ph) * 2;
+        const pt = this._rampPoint(0.08 + q * 0.84);
+        w.group.position.set(pt.x, pt.y, R.z1 + 0.32 + k * 0.12);
+        w.group.rotation.y = goingUp ? Math.PI / 2 : -Math.PI / 2;
+        w.play(goingUp ? 'Carry' : 'Walk'); w.setSpeed(goingUp ? 0.9 : 1.2);
+      } else {
+        w.group.position.set(R.x0 - 0.35 - k * 0.5, 0.08, R.z1 + 0.25 + k * 0.4);
+        w.group.rotation.y = Math.PI / 2;
+        w.play(k ? 'Talk' : 'Idle');
+      }
+    });
+    // stock pile on the plaza
     const put = (mesh, n, granite) => {
       mesh.count = Math.min(12, n);
       for (let i = 0; i < mesh.count; i++) {
@@ -1658,6 +1918,7 @@ export class World {
   // ------------------------------------------------------------------ loop
   update(dt, gdt = dt) {
     this.time += dt;
+    this.gameRate = dt > 0 ? gdt / dt : 0;
     for (const f of [...this.updaters]) f(dt);
     if (this.cheerT > 0) this.cheerT -= dt;
     for (const a of this.actors) if (a.group.visible) a.update(a === this.pharaoh || a === this.priestess ? dt : gdt);

@@ -3,9 +3,9 @@
 // Goods leave a building only along roads the player paints tile by tile: footpaths for light
 // goods, sledge tracks for stone, blocks and granite. Every producer has its own carriers who
 // take the goods to the nearest connected consumer with room; granite crosses the Nile by boat.
-import { RoadGrid, PATH, TRACK, ROAD_COST, tilePolyline, polyLength, riverPolyline } from './roads.js';
+import { RoadGrid, PATH, TRACK, ROAD_COST, tilePolyline, polyLength, riverPolyline, planRoute, idx, tileX, tileZ } from './roads.js';
 
-export const GOODS = ['grain', 'bread', 'stone', 'block', 'ore', 'tools', 'granite'];
+export const GOODS = ['grain', 'bread', 'stone', 'block', 'ore', 'tools', 'granite', 'brick'];
 export const HEAVY = new Set(['stone', 'block', 'granite']);
 
 export const DEFS = {
@@ -18,8 +18,10 @@ export const DEFS = {
   smithy:  { terrain: 'desert',    cost: 50, staff: 2, in: [['ore', 1]], out: ['tools', 2], cycle: 8 },
   granite: { terrain: 'granite',   cost: 60, staff: 3, out: ['granite', 1], cycle: 6, boat: true },
   quay:    { terrain: 'bank',      cost: 40, staff: 1, in: [['granite', 1]], out: ['granite', 1], cycle: 0.6 },
+  // mud bricks: Nile mud tempered with straw from the grain harvest, for the construction ramp
+  brickworks: { terrain: 'desert', cost: 40, staff: 2, in: [['grain', 1]], out: ['brick', 3], cycle: 7 },
 };
-export const ORDER = ['house', 'farm', 'bakery', 'quarry', 'mason', 'mine', 'smithy', 'granite', 'quay'];
+export const ORDER = ['house', 'farm', 'bakery', 'quarry', 'mason', 'brickworks', 'mine', 'smithy', 'granite', 'quay'];
 
 // carriers: speed in tiles per second
 export const CARRIER = {
@@ -42,6 +44,9 @@ const TOOL_EVERY = 4, NO_TOOL_SLOW = 2.5;
 const LOAD_TIME = 0.7;
 export const SITE_PLACE = [3.0, 2.2, 1.6];      // seconds per block, by ramp crew level
 export const SITE_UP = [{ cost: 70, staff: 2 }, { cost: 130, staff: 2 }];
+// mud bricks the ramp crew needs to raise the ramp to tier t (levels with bricks)
+export const rampBricks = (t) => 4 + 2 * t;
+const RAMP_LAY = [1.2, 0.9, 0.7];   // seconds per brick laid, by crew level
 
 export function upgradeCost(type, level) { return Math.round(DEFS[type].cost * (level === 1 ? 1.4 : 2.4)); }
 export function staffFor(type, level) { const d = DEFS[type]; return d.staff ? d.staff + (level - 1) : 0; }
@@ -63,7 +68,7 @@ export class Economy {
     this.pantry = { bread: level.startBread ?? 8 };
     this.buildings = [];
     const P = this.grid.plaza;
-    this.site = { id: 'site', type: 'site', built: true, level: 1, inv: { block: 0, granite: 0 }, incoming: { block: 0, granite: 0 }, placeT: 0, x: P.x, z: P.z };
+    this.site = { id: 'site', type: 'site', built: true, level: 1, inv: { block: 0, granite: 0, brick: 0 }, incoming: { block: 0, granite: 0, brick: 0 }, placeT: 0, x: P.x, z: P.z, ramp: 0, rampLaid: 0, rampT: 0 };
     this.time = 0;
     this.placed = 0;
     this.events = [];
@@ -74,6 +79,7 @@ export class Economy {
     this.topo = 0;            // bumps whenever roads or buildings change
     this._bfsCache = new Map();
     this.roadSpent = 0;
+    this.undoStack = [];
   }
 
   emit(e) { this.events.push(e); }
@@ -85,15 +91,15 @@ export class Economy {
   produces(n) { return n.type !== 'site' && DEFS[n.type].out ? DEFS[n.type].out[0] : null; }
   accepts(n, good) {
     if (!n.built) return false;
-    if (n.type === 'site') return good === 'block' || good === 'granite';
+    if (n.type === 'site') return good === 'block' || good === 'granite' || (good === 'brick' && !!this.L.bricks);
     if (n.type === 'house') return good === 'bread';
     const d = DEFS[n.type];
     if (good === 'tools' && d.usesTools && this.L.tools) return true;
     return !!(d.in && d.in.some(([g]) => g === good));
   }
   stockOf(n, good) { return n.type === 'house' ? this.pantry.bread : (n.inv[good] || 0); }
-  capOf(n) {
-    if (n.type === 'site') return SITE_CAP;
+  capOf(n, good) {
+    if (n.type === 'site') return SITE_CAP + (good === 'brick' ? 2 : 0);
     if (n.type === 'house') return 6 * this.buildings.filter((b) => b.type === 'house' && b.built).length;
     return IN_CAP;
   }
@@ -101,7 +107,7 @@ export class Economy {
     if (n.type === 'house') return this.buildings.reduce((a, b) => a + (b.type === 'house' ? (b.incoming.bread || 0) : 0), 0);
     return n.incoming[good] || 0;
   }
-  space(n, good) { return this.capOf(n) - this.stockOf(n, good) - this.incomingOf(n, good); }
+  space(n, good) { return this.capOf(n, good) - this.stockOf(n, good) - this.incomingOf(n, good); }
   _addStock(n, good, k) { if (n.type === 'house') this.pantry.bread += k; else n.inv[good] = (n.inv[good] || 0) + k; }
   ports(n) { return this.grid.ports(n.x, n.z); }
 
@@ -211,6 +217,66 @@ export class Economy {
     this.emit({ type: 'unroad', x, z });
     return true;
   }
+  // the building (or the site plaza) whose 3x3 footprint holds a tile
+  nodeAtTile(x, z) {
+    for (const n of [...this.buildings, this.site]) if (Math.abs(n.x - x) <= 1 && Math.abs(n.z - z) <= 1) return n;
+    return null;
+  }
+  _ends(x, z) {
+    const n = this.nodeAtTile(x, z);
+    if (n) return { node: n, tiles: this.ports(n).filter((p) => this.grid.free(p.x, p.z)).map((p) => p.i) };
+    if (this.grid.free(x, z)) return { node: null, tiles: [idx(x, z)] };
+    return null;
+  }
+  // a road drawn by dragging from one tile to another: the route, the tiles that cost money and the price
+  planRoad(a, b, type) {
+    const A = this._ends(a.x, a.z), B = this._ends(b.x, b.z);
+    if (!A || !B || !A.tiles.length || !B.tiles.length) return null;
+    if (A.node && A.node === B.node) return null;
+    const route = planRoute(this.grid, A.tiles, B.tiles, type);
+    if (!route) return null;
+    let price = 0;
+    const todo = [];
+    for (const i of route) {
+      const p = this.roadPrice(tileX(i), tileZ(i), type);
+      if (p > 0) { price += p; todo.push(i); }
+    }
+    return { route, todo, price, from: A.node, to: B.node };
+  }
+  // build a planned road in one go (one undo step)
+  buildPlanned(plan, type) {
+    if (!plan || plan.price > this.deben) return false;
+    const step = { tiles: [], spent: 0 };
+    for (const i of plan.todo) {
+      const x = tileX(i), z = tileZ(i), before = this.grid.get(x, z);
+      const r = this.placeRoad(x, z, type);
+      if (r > 0) { step.tiles.push([x, z, before]); step.spent += r; }
+    }
+    if (step.tiles.length) this.undoStack.push(step);
+    return step.spent;
+  }
+  // single tiles painted by tapping also form undo steps
+  placeRoadStep(x, z, type) {
+    const before = this.grid.get(x, z);
+    const r = this.placeRoad(x, z, type);
+    if (r > 0) this.undoStack.push({ tiles: [[x, z, before]], spent: r });
+    return r;
+  }
+  canUndo() { return this.undoStack.length > 0; }
+  undoRoad() {
+    const step = this.undoStack[this.undoStack.length - 1];
+    if (!step || this.deben + step.spent < 0) return null;
+    this.undoStack.pop();
+    for (const [x, z, before] of step.tiles) {
+      this.grid.set(x, z, before);
+      this.emit({ type: before ? 'road' : 'unroad', x, z, kind: before });
+    }
+    this.deben += step.spent;
+    this.roadSpent -= step.spent;
+    this.topo++;
+    return step;
+  }
+
   // tiles of road still to build so that two nodes are joined by the given road type
   suggestRoad(fromId, toId, type) {
     const a = this.node(fromId), b = this.node(toId);
@@ -347,10 +413,26 @@ export class Economy {
       for (const c of b.carriers) this._stepCarrier(b, c, dt, tempo);
     }
 
-    // construction site: the ramp crew hauls one stone at a time up and sets it
+    // construction site: before a new tier the ramp is raised with mud bricks, then the ramp crew
+    // hauls one stone at a time up and sets it
     const S = this.site;
     const good = this.currentGood();
-    if (this.placed < this.total) {
+    const tier = Math.min(this.currentTier(), this.tierSizes.length - 1);
+    if (this.placed < this.total && S.ramp < tier) {
+      if (!this.L.bricks) S.ramp = tier;
+      else {
+        const need = rampBricks(S.ramp + 1);
+        if (S.inv.brick > 0) {
+          S.state = 'ramp';
+          S.rampT += dt * prod;
+          if (S.rampT >= RAMP_LAY[S.level - 1]) {
+            S.rampT = 0; S.inv.brick--; S.rampLaid++;
+            this.emit({ type: 'rampBrick', laid: S.rampLaid, need });
+            if (S.rampLaid >= need) { S.ramp++; S.rampLaid = 0; this.emit({ type: 'rampUp', tier: S.ramp }); }
+          }
+        } else { S.state = 'missing'; S.missing = 'brick'; }
+      }
+    } else if (this.placed < this.total) {
       if (S.inv[good] > 0) {
         S.placeT += dt * prod;
         S.state = 'work';
@@ -366,6 +448,9 @@ export class Economy {
       } else { S.placeT = Math.min(S.placeT, SITE_PLACE[S.level - 1] * 0.3); S.state = 'missing'; S.missing = good; }
     }
   }
+
+  // how far the ramp has risen (tiers, fractional while bricks are being laid)
+  rampLevel() { const S = this.site; return S.ramp + (this.L.bricks && S.ramp < this.tierSizes.length - 1 ? S.rampLaid / rampBricks(S.ramp + 1) : 0); }
 
   _stepCarrier(b, c, dt, tempo) {
     if (c.wait > 0) { c.wait -= dt; return; }
