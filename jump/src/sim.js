@@ -60,7 +60,8 @@ export class Sim {
 
   _newPlayer(x, y) {
     return { x, y, vx: 0, vy: 0, face: 1, ground: false, coyote: 0, buffer: 0, jumpsUsed: 0, climb: false, swim: false, sand: false, wall: 0,
-      inv: 0, hurtT: 0, dead: 0, ride: null, lockX: 0, landT: 0, cut: false, state: 'idle', drop: 0, pushT: 0, pullT: 0, pullV: 0, glide: false };
+      inv: 0, hurtT: 0, dead: 0, ride: null, lockX: 0, landT: 0, cut: false, state: 'idle', drop: 0, pushT: 0, pullT: 0, pullV: 0, glide: false,
+      downT: 0, mantle: 0, regrab: 0 };
   }
 
   emit(type, o = {}) { this.events.push({ type, ...o }); }
@@ -107,6 +108,11 @@ export class Sim {
     if (p.hurtT > 0) p.hurtT -= dt;
     if (p.lockX > 0) p.lockX -= dt;
     if (I.jumpPressed) p.buffer = P.BUFFER; else p.buffer = Math.max(0, p.buffer - dt);
+    // only a deliberate straight "down" (held a moment) lets the explorer drop through planks
+    p.downT = I.y < -0.55 && Math.abs(I.x) < 0.5 ? p.downT + dt : 0;
+    if (p.regrab > 0) p.regrab -= dt;
+    // pulling herself up over an edge
+    if (p.mantle > 0) { this._mantleStep(dt); return; }
     // medium under the explorer
     const mid = this.tile(p.x, p.y + P.H * 0.45), feet = this.tile(p.x, p.y + 0.15), head = this.tile(p.x, p.y + P.H - 0.15);
     const wasSwim = p.swim;
@@ -170,7 +176,7 @@ export class Sim {
         if (p.swim) {
           p.vy = this.tile(p.x, p.y + P.H + 0.1) === T.WATER ? P.SWIM_STROKE : P.JUMP * 0.9;
           p.buffer = 0; this.emit('swim', { x: p.x, y: p.y });
-        } else if (I.y < -0.55 && p.ground && this._onOneway()) {
+        } else if (p.downT > 0.18 && p.ground && this._onOneway()) {
           p.drop = 0.25; p.y -= 0.05; p.ground = false; p.buffer = 0;
         } else if (p.coyote > 0) {
           p.vy = p.sand ? jumpV * 0.62 : jumpV; p.coyote = 0; p.buffer = 0; p.ground = false; p.cut = false; p.jumpsUsed = 0;
@@ -198,6 +204,9 @@ export class Sim {
       p.pushT += dt;
       if (p.pushT > 0.14) { if (this._push(bb.x, bb.y, bb.dir)) p.pushT = -0.12; else p.pushT = 0.1; }
     } else if (p.pushT > 0 || !bb) p.pushT = 0;
+    // jumping against an edge that is a little too high: grab it and pull up
+    if (!p.ground && !p.climb && !p.swim && ax && p.vy < 5 && p.regrab <= 0 && p.hurtT <= 0) this._tryMantle(Math.sign(ax));
+    if (p.mantle > 0) return;
     // falling out of the world
     if (p.y < -2) this._die('pit');
     // animation state
@@ -210,6 +219,38 @@ export class Sim {
     else p.state = Math.abs(p.vx) > 0.6 ? 'run' : 'idle';
     if (was === 'fall' && p.state !== 'fall' && p.ground) { p.landT = 0.2; this.emit('land', { x: p.x, y: p.y, v: -p.lastVy }); }
     p.lastVy = p.vy;
+  }
+
+  _tryMantle(side) {
+    const p = this.p;
+    const cx = Math.floor(p.x + side * (P.W / 2 + 0.1));
+    const lo = Math.ceil(p.y + 0.7), hi = Math.floor(p.y + P.H + 0.6);
+    for (let ty = lo; ty <= hi; ty++) {
+      if (!this.solidAt(cx, ty - 1) || this.solidAt(cx, ty) || this.solidAt(cx, ty + 1)) continue;
+      // room to rise in her own column, and to stand on top
+      const own = Math.floor(p.x);
+      if (own !== cx && (this.solidAt(own, ty) || this.solidAt(own, ty + 1))) continue;
+      const tx = side > 0 ? cx + 0.45 : cx + 0.55;
+      let free = true;
+      for (let c = Math.floor(tx - P.W / 2); c <= Math.floor(tx + P.W / 2); c++) if (this.solidAt(c, ty) || this.solidAt(c, ty + 1)) free = false;
+      if (!free) continue;
+      p.mantle = 0.34; p.mFrom = { x: p.x, y: p.y }; p.mTo = { x: tx, y: ty }; p.face = side;
+      p.vx = 0; p.vy = 0; p.ride = null;
+      this.emit('mantle', { x: p.x, y: p.y, side });
+      return true;
+    }
+    return false;
+  }
+  _mantleStep(dt) {
+    const p = this.p;
+    p.mantle -= dt;
+    const k = 1 - Math.max(0, p.mantle) / 0.34;
+    const up = Math.min(1, k / 0.6), over = Math.max(0, (k - 0.35) / 0.65);
+    const ease = (q) => q * q * (3 - 2 * q);
+    p.y = p.mFrom.y + (p.mTo.y - p.mFrom.y) * ease(up);
+    p.x = p.mFrom.x + (p.mTo.x - p.mFrom.x) * ease(Math.min(1, over));
+    p.vx = 0; p.vy = 0; p.state = 'mantle';
+    if (p.mantle <= 0) { p.x = p.mTo.x; p.y = p.mTo.y; p.ground = true; p.state = 'idle'; p.regrab = 0.2; p.landT = 0.2; this.emit('land', { x: p.x, y: p.y, v: 3 }); }
   }
 
   _onOneway() { const p = this.p; const t = this.tile(p.x, p.y - 0.1); return t === T.ONEWAY || (p.ride && true); }

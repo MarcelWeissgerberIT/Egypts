@@ -14,7 +14,9 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
 ## Steuerung (Touch, wie beim Game Boy)
 
 * **Steuerkreuz links unten:** laufen, Leitern hoch und runter (oben auf der Leiter „runter“ drücken),
-  „runter“ + Springen fällt durch Holzplanken, im Stehen hoch/runter halten schaut nach oben/unten.
+  gerade nach unten halten + Springen fällt durch Holzplanken, im Stehen hoch/runter halten schaut nach
+  oben/unten. Springt die Forscherin gegen eine Kante, die etwas zu hoch ist (Mauer, Glyphen-Block,
+  Steinblock), greift sie zu und zieht sich hoch.
   Der Daumen kann über das Kreuz gleiten (8 Richtungen), jede Berührung der linken Hälfte zählt.
 * **A (Pfeil, rechts oben):** Springen, länger halten = höher. Großzügige Sprungtoleranz.
 * **B (Hand, links unten davon):** rissige Steine aufbrechen, Hebel ziehen, Symbolsäulen drücken,

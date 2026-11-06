@@ -161,6 +161,7 @@ class Game {
         case 'jump': this.sfx.jump(); this._jumped = true; break;
         case 'djump': case 'walljump': this.sfx.djump(); break;
         case 'land': if (e.v > 5) this.sfx.land(); break;
+        case 'mantle': this.sfx.footstep(); this.sfx.footstep(true); break;
         case 'coin': this.sfx.coin(); this.ui.bumpCoins(); break;
         case 'papyrus': this.sfx.secret(); this.ui.bumpPapyrus(e.id); this.ui.flash(); break;
         case 'heal': this.sfx.ankh(); break;

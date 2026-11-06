@@ -137,6 +137,15 @@ export class Stage {
       c.fillStyle = '#e8b040'; c.fillRect(0, h * 0.4, w, h * 0.02); c.fillRect(0, h * 0.51, w, h * 0.02);
       c.fillStyle = '#2a8a8a'; for (let x = 4; x < w; x += 16) c.fillRect(x, h * 0.6, 6, h * 0.05);
     });
+    this.plankTex = canvasTex(128, 32, (c, w, h) => {
+      c.fillStyle = '#9a6234'; c.fillRect(0, 0, w, h);
+      for (let x = 0; x < w; x += 32) {
+        const g = c.createLinearGradient(x, 0, x, h); g.addColorStop(0, '#c08048'); g.addColorStop(0.5, '#a86a38'); g.addColorStop(1, '#7a4a24'); c.fillStyle = g; c.fillRect(x + 1, 1, 30, h - 2);
+        c.strokeStyle = 'rgba(60,30,10,0.35)'; c.lineWidth = 1; for (let k = 0; k < 4; k++) { c.beginPath(); c.moveTo(x + 2, 6 + k * 6 + (x % 3)); c.bezierCurveTo(x + 10, 4 + k * 6, x + 20, 9 + k * 6, x + 30, 6 + k * 6); c.stroke(); }
+        c.fillStyle = '#3a2410'; c.fillRect(x, 0, 1.5, h);
+        c.fillStyle = '#e8c070'; c.beginPath(); c.arc(x + 5, 6, 1.6, 0, 7); c.arc(x + 5, h - 6, 1.6, 0, 7); c.fill();
+      }
+    });
     this.gemCols = [0x3ff0d8, 0xc070ff, 0xffc030, 0xff6aa0];
     this.symCols = { ankh: 0x40f0d0, lotus: 0xff70c0, djed: 0xffb030, falcon: 0x5a8cff };
     this.gold = new THREE.MeshStandardMaterial({ color: 0xffc94a, metalness: 0.85, roughness: 0.3, emissive: 0x3a2000, emissiveIntensity: 0.4 });
@@ -224,7 +233,7 @@ export class Stage {
       for (const m of mats) {
         if (m.userData && m.userData.shared) continue;
         if (m.userData && m.userData.keepMaps) { m.dispose(); continue; }
-        for (const k of ['map', 'alphaMap']) if (m[k] && !shared.has(m[k]) && ![this.flameTex, this.rayTex, this.crackTex, this.linenTex, this.ptex.glow, this.ringTex, this.wingTex, this.jarTex, this.blob.material.map].includes(m[k])) m[k].dispose();
+        for (const k of ['map', 'alphaMap']) if (m[k] && !shared.has(m[k]) && ![this.flameTex, this.rayTex, this.crackTex, this.linenTex, this.ptex.glow, this.ringTex, this.wingTex, this.jarTex, this.blob.material.map, this.plankTex].includes(m[k])) m[k].dispose();
         if (![this.gold, this.bronze, this.wood, this.darkWood].includes(m)) m.dispose();
       }
     });
@@ -308,8 +317,9 @@ export class Stage {
       if (t === T.SPIKE_DOWN) for (const k of [0.17, 0.5, 0.83]) spikes.push([x + k, y + 1, 0.3, -1]);
     }
     const inst = (geo, mat, list, set) => { if (!list.length) return null; const m = new THREE.InstancedMesh(geo, mat, list.length); list.forEach((e, i) => { set(e); m.setMatrixAt(i, tmpM); }); m.castShadow = true; m.receiveShadow = true; this.level.add(m); return m; };
-    const slabMat = new THREE.MeshStandardMaterial({ map: this.blockMat.map, color: new THREE.Color(this.L.theme.tint).multiplyScalar(0.92), roughness: 0.85 });
-    inst(new THREE.BoxGeometry(1.02, 0.28, 1.5), slabMat, ledges, ([x, y]) => tmpM.compose(tmpV.set(x, y, 0.1), tmpQ.identity(), tmpS.set(1, 1, 1)));
+    // one-way ledges are wooden planks, so it is clear they can be jumped through from below
+    const slabMat = new THREE.MeshStandardMaterial({ map: this.plankTex, color: 0xffffff, roughness: 0.85 });
+    inst(new THREE.BoxGeometry(1.0, 0.22, 1.5), slabMat, ledges, ([x, y]) => tmpM.compose(tmpV.set(x, y, 0.1), tmpQ.identity(), tmpS.set(1, 1, 1)));
     inst(new THREE.BoxGeometry(0.08, 1.0, 0.08), this.wood, rails, ([x, y]) => tmpM.compose(tmpV.set(x, y, 0.55), tmpQ.identity(), tmpS.set(1, 1, 1)));
     inst(new THREE.BoxGeometry(0.8, 0.07, 0.07), this.wood, rungs, ([x, y]) => tmpM.compose(tmpV.set(x, y, 0.55), tmpQ.identity(), tmpS.set(1, 1, 1)));
     inst(new THREE.ConeGeometry(0.13, 0.5, 6), this.bronze, spikes, ([x, y, z, s]) => tmpM.compose(tmpV.set(x, y + s * 0.25, z), tmpQ.setFromAxisAngle(new THREE.Vector3(1, 0, 0), s > 0 ? 0 : Math.PI), tmpS.set(1, 1, 1)));
@@ -919,10 +929,11 @@ export class Stage {
     let dy = want - this.plYaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
     this.plYaw += dy * Math.min(1, dt * 14);
     g.rotation.y = p.state === 'climb' ? Math.PI : this.plYaw;
-    const anim = { idle: 'Idle', run: 'Run', push: 'Run', jump: 'Jump', fall: 'Fall', climb: 'Climb', swim: 'Swim', hurt: 'Hit', win: 'Cheer' }[p.state] || 'Idle';
+    const anim = { idle: 'Idle', run: 'Run', push: 'Run', jump: 'Jump', fall: 'Fall', climb: 'Climb', mantle: 'Climb', swim: 'Swim', hurt: 'Hit', win: 'Cheer' }[p.state] || 'Idle';
     if (this.landT > 0) this.landT -= gdt;
     if (p.dead > 0) this.pl.play('Hit', { once: true, fade: 0.1 });
     else if (p.state === 'push') this.pl.play('Run', { speed: 0.42, fade: 0.2 });
+    else if (p.state === 'mantle') this.pl.play('Climb', { speed: 2.2, fade: 0.06 });
     else if (anim === 'Run') this.pl.play('Run', { speed: 0.75 + 0.35 * Math.min(1, Math.abs(p.vx) / P.RUN), fade: this.landT > 0 ? 0.12 : 0.18 });
     else if (anim === 'Climb') this.pl.play('Climb', { speed: Math.abs(p.vy) > 0.2 || Math.abs(p.vx) > 0.2 ? 1.1 : 0.0001 });
     else if (anim === 'Jump') this.pl.play('Jump', { once: true, speed: 1.0, fade: 0.08 });
