@@ -9,6 +9,8 @@ export const H = 18;                     // minimum level height in tiles (chamb
 const HMAX = 72;
 export const SYMBOLS = ['ankh', 'lotus', 'djed', 'falcon'];
 export const POWERS = ['shield', 'stick', 'feather', 'sun'];
+// the guardian at the end of every world; the last one is the dead pharaoh
+export const BOSSES = ['scarabking', 'colossus', 'sobek', 'queen', 'mummylord', 'apep', 'anubis', 'sphinx', 'ammit', 'pharaoh'];
 
 // world themes: background painting, block texture, light mood and what appears there
 export const WORLDS = [
@@ -16,12 +18,13 @@ export const WORLDS = [
   { key: 'hieroglyphs', tex: 'sandstone', tint: 0xf0d4b0, amb: 0.9, fog: 0x2e1848, sky: 0xd8a0ff, enemies: ['scarab', 'mummy', 'hopper'], feats: ['tower', 'ladder', 'crumble'] },
   { key: 'cistern', tex: 'sandstone', tint: 0xc8e0e8, amb: 0.85, fog: 0x15304a, sky: 0x60e0ff, enemies: ['scarab', 'mummy', 'bat'], feats: ['tower', 'ladder', 'crumble', 'water', 'mover'] },
   { key: 'scarabs', tex: 'sandstone', tint: 0xe8c890, amb: 0.85, fog: 0x2a1a30, sky: 0xffb860, enemies: ['scarab', 'bat', 'flyer', 'hopper'], feats: ['tower', 'ladder', 'crumble', 'mover', 'darts'] },
-  { key: 'crypt', tex: 'granite', tint: 0xb8a8d8, amb: 0.35, fog: 0x0e0618, sky: 0x8060ff, dark: true, enemies: ['scarab', 'bat', 'mummy', 'flyer'], feats: ['tower', 'ladder', 'crumble', 'darts', 'water'] },
-  { key: 'sandfalls', tex: 'sandstone', tint: 0xffd09a, amb: 0.95, fog: 0x3a2030, sky: 0xffa050, enemies: ['scarab', 'bat', 'hopper', 'mummy'], feats: ['tower', 'sand', 'sandfall', 'boulder', 'crumble', 'mover'] },
-  { key: 'traps', tex: 'granite', tint: 0xd8b0a0, amb: 0.7, fog: 0x200a14, sky: 0xff6050, enemies: ['scarab', 'mummy', 'flyer', 'hopper'], feats: ['tower', 'crusher', 'fire', 'darts', 'mover', 'vmover', 'crumble'] },
-  { key: 'treasury', tex: 'sandstone', tint: 0xffe08a, amb: 1.0, fog: 0x3a2410, sky: 0xffd040, enemies: ['scarab', 'bat', 'cobra', 'flyer'], feats: ['tower', 'mover', 'vmover', 'fire', 'crumble', 'darts', 'water'] },
-  { key: 'stars', tex: 'granite', tint: 0xb0c0ff, amb: 0.7, fog: 0x080a28, sky: 0x9fb0ff, enemies: ['bat', 'mummy', 'cobra', 'flyer', 'hopper'], feats: ['tower', 'shaft', 'mover', 'vmover', 'crumble', 'crusher', 'sand'] },
-  { key: 'king', tex: 'granite', tint: 0xffb0c8, amb: 0.75, fog: 0x200818, sky: 0xd060ff, enemies: ['scarab', 'bat', 'mummy', 'cobra', 'flyer', 'hopper'], feats: ['tower', 'shaft', 'crusher', 'fire', 'darts', 'boulder', 'mover', 'vmover', 'crumble', 'sand', 'water'] },
+  // the dark world: only torches give light; the explorer carries one and lights those on the walls
+  { key: 'crypt', tex: 'granite', tint: 0xb8a8d8, amb: 0.35, fog: 0x06030c, sky: 0x8060ff, dark: true, torchlit: true, enemies: ['scarab', 'bat', 'mummy', 'flyer'], feats: ['tower', 'ladder', 'crumble', 'darts', 'water'] },
+  { key: 'sandfalls', tex: 'sandstone', tint: 0xffd09a, amb: 0.95, fog: 0x3a2030, sky: 0xffa050, enemies: ['scarab', 'bat', 'hopper', 'mummy', 'jackal'], feats: ['tower', 'sand', 'sandfall', 'boulder', 'crumble', 'mover'] },
+  { key: 'traps', tex: 'granite', tint: 0xd8b0a0, amb: 0.7, fog: 0x200a14, sky: 0xff6050, enemies: ['scarab', 'mummy', 'flyer', 'hopper', 'jackal'], feats: ['tower', 'crusher', 'fire', 'darts', 'mover', 'vmover', 'crumble'] },
+  { key: 'treasury', tex: 'sandstone', tint: 0xffe08a, amb: 1.0, fog: 0x3a2410, sky: 0xffd040, enemies: ['scarab', 'bat', 'cobra', 'flyer', 'jackal'], feats: ['tower', 'mover', 'vmover', 'fire', 'crumble', 'darts', 'water'] },
+  { key: 'stars', tex: 'granite', tint: 0xb0c0ff, amb: 0.7, fog: 0x080a28, sky: 0x9fb0ff, enemies: ['bat', 'mummy', 'cobra', 'flyer', 'hopper', 'jackal'], feats: ['tower', 'shaft', 'mover', 'vmover', 'crumble', 'crusher', 'sand'] },
+  { key: 'king', tex: 'granite', tint: 0xffb0c8, amb: 0.75, fog: 0x200818, sky: 0xd060ff, enemies: ['scarab', 'bat', 'mummy', 'cobra', 'flyer', 'hopper', 'jackal'], feats: ['tower', 'shaft', 'crusher', 'fire', 'darts', 'boulder', 'mover', 'vmover', 'crumble', 'sand', 'water'] },
 ];
 
 // abilities: double jump from world 8 (golden sandals), wall jump from world 9 (falcon gloves)
@@ -46,7 +49,8 @@ export function generateLevel(n) {
   const d = Math.min(1, (world - 1) / 9 * 0.75 + (index - 1) / 9 * 0.35);   // difficulty 0..1
   const maxGap = (A.double ? 6 : 4) - (d < 0.25 ? 1 : 0);
   const maxUp = A.double ? 3 : 2;
-  const width = 64 + world * 9 + index * 6;
+  const bossLevel = index === 10;
+  const width = Math.round((64 + world * 9 + index * 6) * (bossLevel ? 0.62 : 1));
   const cols = [];                       // columns of tile codes
   const ents = [];
   const full = [];                       // columns filled solid from a height up to the ceiling
@@ -76,7 +80,7 @@ export function generateLevel(n) {
   const flat = (w, coins = true) => {
     for (let k = 0; k < w; k++) ground(x + k, g);
     if (coins && R() < 0.6) coinRow(x + 1, x + w - 2, g + (R() < 0.5 ? 0 : 2));
-    if (R() < 0.35) ent('torch', x + ri(1, w - 1) + 0.5, g + 2.2);
+    if (R() < (W.torchlit ? 0.6 : 0.35)) ent('torch', x + ri(1, w - 1) + 0.5, g + 2.2, { lit: !W.torchlit });
     if (!calm && w >= 3 && x > 15 && R() < foeRate) foe(x + ri(1, w - 2), g);
     if (!calm && w >= 4 && x > 12 && R() < 0.1) jar(x + ri(1, w - 2), g);
     x += w;
@@ -353,7 +357,7 @@ export function generateLevel(n) {
 
   // ---------------------------------------------------------------- puzzles
   // a gate in a wall that reaches the ceiling
-  const gate = (gx, id) => { for (let y = g; y < g + 3; y++) set(gx, y, T.GATE); ground(gx, g); full.push([gx, g + 3]); ent('gate', gx, g, { h: 3, gid: id, gem: id % 4 }); };
+  function gate(gx, id, h = 3) { for (let y = g; y < g + h; y++) set(gx, y, T.GATE); ground(gx, g); full.push([gx, g + h]); ent('gate', gx, g, { h, gid: id, gem: id % 4 }); }
   const PZ = {
     // the lever sits up on a ledge, down in a pit or behind a short climb
     lever() {
@@ -442,7 +446,7 @@ export function generateLevel(n) {
   // start: entrance hall
   flat(10, false);
   L.spawn = { x: 4.5, y: g };
-  ent('torch', 2.5, g + 2.2);
+  ent('torch', 2.5, g + 2.2, { lit: true });
   const pool = ['run', 'hill', 'gap', 'gap', 'floaters', 'spikes', 'stairs', 'treasure', 'patrol'];
   const feat = { ladder: 'ladder', crumble: 'crumble', water: 'pool', mover: 'mover', vmover: 'vmover', darts: 'darts', crusher: 'crusher', fire: 'fire', sand: 'sand', sandfall: 'sandfall', boulder: 'boulder', shaft: 'shaft', tower: 'tower' };
   for (const f of W.feats) pool.push(feat[f], feat[f]);
@@ -478,6 +482,7 @@ export function generateLevel(n) {
     if (secret < 3 && x >= secretsAt[secret]) { placeSecret(secret); secret++; }
   }
   while (secret < 3) { placeSecret(secret); secret++; }
+  if (bossLevel) arena();
   // finish: the golden door
   flat(4, false);
   ent('exit', x + 2, g);
@@ -485,6 +490,40 @@ export function generateLevel(n) {
   full.push([x, 0]);
   ensure(x);
   x++;
+
+  // the guardian's hall: a closed arena; the door shuts behind the explorer and opens again when
+  // the guardian falls, then the way to the golden door is free
+  function arena() {
+    calm = true;
+    const kind = BOSSES[world - 1];
+    // a power-up and a checkpoint before the fight
+    flat(3, false);
+    set(x + 1, g + 3, T.ITEM); ent('itemblock', x + 1, g + 3, { item: world % 2 ? 'shield' : 'stick', n: 1 });
+    set(x + 3, g + 3, T.ITEM); ent('itemblock', x + 3, g + 3, { item: world % 2 ? 'stick' : 'shield', n: 1 });
+    flat(6, false);
+    ent('checkpoint', x - 1.5, g);
+    flat(2, false);
+    const AW = 24, ax0 = x, fy = g, top = g + 11, id = gid++;
+    // entry door (open until the fight starts) and the wall above it
+    ground(ax0, g); full.push([ax0, g + 4]);
+    ent('gate', ax0, g, { h: 4, gid: id + 1000, gem: 1, startOpen: true, entry: true });
+    x = ax0 + 1;
+    flat(AW, false);
+    for (let xx = ax0; xx <= ax0 + AW + 1; xx++) set(xx, top, T.SOLID);
+    // two side ledges and a higher middle ledge to dodge and to jump from
+    for (let q = 0; q < 4; q++) { set(ax0 + 4 + q, g + 1, T.ONEWAY); set(ax0 + AW - 7 + q, g + 1, T.ONEWAY); }
+    for (let q = 0; q < 5; q++) set(ax0 + 10 + q, g + 3, T.ONEWAY);
+    if (kind === 'sobek') {
+      // a pool in the middle of the hall
+      for (let q = 0; q < 8; q++) { const cx = ax0 + 9 + q; ground(cx, g - 3); for (let y = g - 3; y < g; y++) set(cx, y, T.WATER); }
+    }
+    for (const tx of [ax0 + 2, ax0 + AW - 1, ax0 + 9, ax0 + 17]) ent('torch', tx + 0.5, g + 3.6, { lit: true });
+    ent('boss', ax0 + AW * 0.68, fy, { kind, gid: id, ax0: ax0 + 1, ax1: ax0 + AW + 1, fy, top, holes: [ax0 + 2.6, ax0 + 12.5, ax0 + AW - 1.6], ledges: [[ax0 + 4, ax0 + 8], [ax0 + AW - 7, ax0 + AW - 3]] });
+    ent('chamber', ax0, fy, { w: AW + 1, h: 11 });
+    // exit door, opened when the guardian falls
+    gate(x, id); x++;
+    calm = false;
+  }
 
   // three hidden papyrus fragments per level
   function placeSecret(i) {

@@ -2,6 +2,7 @@
 // power-ups and puzzles (levers, stone blocks on pressure plates, symbol pedestals).
 // Pure logic (no rendering) so it can be stepped headless; the renderer reads its state and events.
 import { T } from './levels.js';
+import { BOSS_DEF, bossInit, bossStep, bossHeight } from './boss.js';
 
 export const P = {
   W: 0.62, H: 1.36,
@@ -15,7 +16,8 @@ export const P = {
 };
 const EPS = 1e-4;
 const solidT = (t) => t === T.SOLID || t === T.CRACKED || t === T.CRUMBLE || t === T.GATE || t === T.BLOCK || t === T.ITEM;
-const FOES = new Set(['scarab', 'mummy', 'bat', 'flyer', 'hopper', 'cobra']);
+const FOES = new Set(['scarab', 'mummy', 'bat', 'flyer', 'hopper', 'cobra', 'jackal']);
+const HP = { mummy: 2 };
 
 export class Sim {
   constructor(level) {
@@ -31,7 +33,7 @@ export class Sim {
     this.deaths = 0;
     this.check = { x: level.spawn.x, y: level.spawn.y };
     this.won = false;
-    this.ents = level.ents.map((e, i) => ({ ...e, id: i, alive: true, t: 0, vx: 0, vy: 0, hp: e.type === 'mummy' ? 2 : 1, x0: e.x, y0: e.y, dir: e.dir || 1 }));
+    this.ents = level.ents.map((e, i) => ({ ...e, id: i, alive: true, t: 0, vx: 0, vy: 0, hp: HP[e.type] || 1, x0: e.x, y0: e.y, dir: e.dir || 1 }));
     // power-ups wait hidden inside their glyph block or jar
     for (const e of this.ents.slice()) {
       if ((e.type === 'itemblock' && e.item !== 'coin') || (e.type === 'jar' && e.item !== 'coins')) {
@@ -42,11 +44,14 @@ export class Sim {
     this.gates = new Map();
     this.puzzles = new Map();
     for (const e of this.ents) {
-      if (e.type === 'gate') { e.open = false; this.gates.set(e.gid, e); }
+      if (e.type === 'gate') { e.open = !!e.startOpen; this.gates.set(e.gid, e); }
+      if (e.type === 'boss') { bossInit(e); this.boss = e; }
+      if (e.type === 'torch') e.lit = e.lit !== false;
       if (e.type === 'tablet') this.puzzles.set(e.gid, { seq: e.seq, step: 0 });
       if (e.type === 'block') { e.rx = e.x; e.ry = e.y; }
     }
     this.darts = [];
+    this.shots = [];                           // fireballs, venom, waves, rocks, eggs, spears
     this.pw = { shield: false, stick: false, feather: 0, sun: 0 };
     this.stick = null;
     this.p = this._newPlayer(level.spawn.x, level.spawn.y);
@@ -322,6 +327,30 @@ export class Sim {
     if (!g || g.open || g.opening !== undefined) return;
     g.opening = delay;
   }
+  _closeGate(gid) {
+    const g = this.gates.get(gid);
+    if (!g || !g.open) return;
+    g.open = false; g.opening = undefined;
+    for (let y = g.y; y < g.y + g.h; y++) this.setTile(g.x, y, T.GATE);
+    this.emit('gateClose', { x: g.x + 0.5, y: g.y, gid, id: g.id });
+  }
+  _spawnFoe(type, x, y, o = {}) {
+    const e = { type, x, y, x0: x, y0: y, id: this.ents.length, alive: true, t: 0, vx: 0, vy: 0, hp: HP[type] || 1, dir: 1, ...o };
+    this.ents.push(e);
+    this.emit('spawn', { id: e.id, x, y, type });
+    return e;
+  }
+  _shot(o) { this.shots.push({ alive: true, wait: 0, ...o }); }
+  _bossHit(B) {
+    B.hp--; B.inv = 0.8;
+    this.emit('bossHit', { x: B.x, y: B.y + bossHeight(B), hp: B.hp, id: B.id });
+    if (B.hp <= 0) {
+      B.phase = 'dying'; B.st = 0; B.vul = false; B.beam = false;
+      this.shots = [];
+      for (const e of this.ents) if (e.minion && e.alive) this._defeat(e, 'boss');
+      this.emit('bossDie', { x: B.x, y: B.y, kind: B.kind });
+    } else { B.state = BOSS_DEF[B.kind].mode === 'hidden' ? 'sink' : 'recover'; B.st = 0; }
+  }
   _block(x, y) { return this.ents.find((e) => e.type === 'block' && e.x === x && e.y === y && !e.slide && !e.fall); }
   _push(bx, by, dir) {
     const b = this._block(bx, by);
@@ -441,6 +470,22 @@ export class Sim {
           e.x = nx; e.y = ny;
           break;
         }
+        case 'jackal': {
+          // a temple guard: patrols, spots the explorer, barks and charges
+          const dist = p.x - e.x, sees = Math.abs(dist) < 7 && Math.abs(p.y - e.y) < 1.2 && Math.sign(dist) === e.dir && p.dead <= 0;
+          e.mode = e.mode || 'walk';
+          if (e.mode === 'walk' && sees) { e.mode = 'alert'; e.mt = 0.45; this.emit('bark', { x: e.x, y: e.y, id: e.id }); }
+          const sp = e.mode === 'charge' ? 8.2 : e.mode === 'walk' ? 1.5 : 0;
+          if (e.mode === 'alert' || e.mode === 'rest') { e.mt -= dt; if (e.mt <= 0) { e.mode = e.mode === 'alert' ? 'charge' : 'walk'; e.mt = 1.5; } }
+          if (sp) {
+            const ahead = e.x + e.dir * 0.5;
+            const wall = this.solidAt(Math.floor(ahead), Math.floor(e.y + 0.3));
+            const edge = !this.solidAt(Math.floor(ahead), Math.floor(e.y - 0.5)) && this.tile(ahead, e.y - 0.5) !== T.ONEWAY;
+            if (wall || edge) { if (e.mode === 'charge') { e.mode = 'rest'; e.mt = 0.9; } e.dir = -e.dir; } else e.x += e.dir * sp * dt;
+            if (e.mode === 'charge') { e.mt -= dt; if (e.mt <= 0) { e.mode = 'rest'; e.mt = 0.9; } }
+          }
+          break;
+        }
         case 'scarab': case 'mummy': {
           const sp = e.type === 'scarab' ? 1.3 : 0.95;
           if (e.type === 'mummy' && Math.abs(p.x - e.x) < 8 && Math.abs(p.y - e.y) < 3) e.dir = p.x > e.x ? 1 : -1;
@@ -473,12 +518,35 @@ export class Sim {
           }
           break;
         }
-        case 'bat': e.x = e.x0 + Math.sin(e.t * 1.1) * e.r * 1.6; e.y = e.y0 + Math.sin(e.t * 2.3) * 0.45; e.dir = Math.cos(e.t * 1.1) > 0 ? 1 : -1; break;
+        case 'bat': {
+          // circles, then swoops down at the explorer and climbs back
+          e.mode = e.mode || 'hover';
+          if (e.mode === 'hover') {
+            e.ht = (e.ht || 0) + dt; e.cool = (e.cool || 0) - dt;
+            e.x = e.x0 + Math.sin(e.ht * 1.1) * e.r * 1.6; e.y = e.y0 + Math.sin(e.ht * 2.3) * 0.45; e.dir = Math.cos(e.ht * 1.1) > 0 ? 1 : -1;
+            if (e.cool <= 0 && Math.abs(p.x - e.x) < 4.5 && p.y < e.y - 0.5 && e.y - p.y < 6 && p.dead <= 0) { e.mode = 'dive'; e.tx = p.x; e.ty = p.y + 0.7; e.mt = 0; this.emit('screech', { x: e.x, y: e.y }); }
+          } else if (e.mode === 'dive') {
+            e.mt += dt; const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy);
+            e.dir = dx > 0 ? 1 : -1;
+            if (d < 0.3 || e.mt > 1.2) { e.mode = 'back'; } else { e.x += dx / d * 6.5 * dt; e.y += dy / d * 6.5 * dt; }
+          } else {
+            const hx = e.x0 + Math.sin(e.ht * 1.1) * e.r * 1.6, hy = e.y0 + Math.sin(e.ht * 2.3) * 0.45, dx = hx - e.x, dy = hy - e.y, d = Math.hypot(dx, dy);
+            if (d < 0.2) { e.mode = 'hover'; e.cool = 2.4; } else { e.x += dx / d * 3.2 * dt; e.y += dy / d * 3.2 * dt; e.dir = dx > 0 ? 1 : -1; }
+          }
+          break;
+        }
         case 'flyer': { const a = e.t * 0.9 + (e.ph || 0); e.x = e.x0 + Math.sin(a) * e.r; e.y = e.y0 + Math.sin(e.t * 2.1) * 0.4; e.dir = Math.cos(a) > 0 ? 1 : -1; break; }
         case 'cobra': {
           e.dir = p.x > e.x ? 1 : -1;
           const near = Math.abs(p.x - e.x) < 2.6 && Math.abs(p.y - e.y) < 1.5;
           if (near && !(e.strike > 0) && !(e.cool > 0)) { e.strike = 0.45; this.emit('hiss', { x: e.x, y: e.y }); }
+          // further away it spits venom in an arc
+          e.spit = (e.spit ?? 1 + (e.id % 3) * 0.5) - dt;
+          if (!near && e.spit <= 0 && Math.abs(p.x - e.x) < 8 && Math.abs(p.y - e.y) < 2.5 && p.dead <= 0) {
+            e.spit = 2.6; const T0 = 0.9, g = 10, sx = e.x + e.dir * 0.3, sy = e.y + 1.0;
+            this._shot({ kind: 'venom', x: sx, y: sy, vx: (p.x - sx) / T0, vy: (p.y + 0.5 - sy + 0.5 * g * T0 * T0) / T0, g, r: 0.25, life: 3 });
+            this.emit('spit', { x: sx, y: sy });
+          }
           if (e.strike > 0) { e.strike -= dt; if (e.strike <= 0) e.cool = 1.1; }
           if (e.cool > 0) e.cool -= dt;
           break;
@@ -501,6 +569,7 @@ export class Sim {
         }
         case 'fire': { const ph = (e.t + (e.phase || 0)) % e.period; e.warn = ph < 0.45; e.burning = ph >= 0.45 && ph < 0.45 + e.on; break; }
         case 'itemblock': if (e.bounce > 0) e.bounce -= dt; break;
+        case 'boss': bossStep(this, e, dt); break;
         case 'power': if (!e.hidden && e.rise > 0) e.rise = Math.max(0, e.rise - dt); break;
         case 'gate':
           if (e.opening !== undefined && !e.open) {
@@ -555,6 +624,22 @@ export class Sim {
       if (d.x < 0 || d.x > this.L.w) d.alive = false;
     }
     this.darts = this.darts.filter((d) => d.alive);
+    // guardian and cobra shots
+    for (const s2 of this.shots) {
+      if (!s2.alive) continue;
+      if (s2.wait > 0) { s2.wait -= dt; continue; }
+      s2.life -= dt;
+      s2.vy -= s2.g * dt; s2.x += s2.vx * dt; s2.y += s2.vy * dt;
+      if (s2.life <= 0) { s2.alive = false; continue; }
+      if (s2.kind === 'wave') { if (this.solidAt(Math.floor(s2.x + Math.sign(s2.vx) * 0.3), Math.floor(s2.y))) s2.alive = false; continue; }
+      const t = this.tile(s2.x, s2.y);
+      if (solidT(t) || (s2.vy < 0 && t === T.ONEWAY && s2.kind !== 'rock') || s2.y < -2 || (s2.floor !== undefined && s2.y <= s2.floor)) {
+        s2.alive = false;
+        if (s2.kind === 'egg' && this.ents.filter((e) => e.minion && e.alive).length < 4) this._spawnFoe('scarab', s2.x, Math.floor(s2.y) + 1, { minion: true, dir: p.x > s2.x ? 1 : -1 });
+        this.emit('shotHit', { x: s2.x, y: s2.y, kind: s2.kind });
+      }
+    }
+    this.shots = this.shots.filter((q) => q.alive);
     // the throwing stick flies out and comes back
     const s = this.stick;
     if (s) {
@@ -567,9 +652,17 @@ export class Sim {
         s.x += dx / dd * 14 * dt; s.y += dy / dd * 14 * dt;
         if (dd < 0.6 || s.t > 3 || p.dead > 0) { this.stick = null; this.emit('catch', { x: p.x, y: p.y }); }
       }
+      const B2 = this.boss;
+      if (this.stick && B2 && B2.phase === 'fight' && !B2.hidden && !s.hit.has(B2.id)) {
+        const D = BOSS_DEF[B2.kind];
+        if (Math.abs(s.x - B2.x) < D.w / 2 + 0.2 && s.y > B2.y && s.y < B2.y + bossHeight(B2) + 0.2) {
+          s.hit.add(B2.id); s.back = true;
+          if (B2.vul && B2.inv <= 0) this._bossHit(B2); else this.emit('clink', { x: s.x, y: s.y });
+        }
+      }
       if (this.stick) for (const e of this.ents) {
         if (!e.alive || s.hit.has(e.id)) continue;
-        const cy = e.type === 'mummy' ? e.y + 0.8 : e.type === 'bat' || e.type === 'flyer' ? e.y : e.y + 0.35;
+        const cy = e.type === 'mummy' || e.type === 'jackal' ? e.y + 0.8 : e.type === 'bat' || e.type === 'flyer' ? e.y : e.y + 0.35;
         if (Math.abs(e.x - s.x) < 0.6 && Math.abs(cy - s.y) < 0.75) {
           if (FOES.has(e.type)) { s.hit.add(e.id); e.hp--; if (e.hp <= 0) this._defeat(e, 'stick'); else this.emit('stompHit', { x: e.x, y: e.y + 1, id: e.id }); }
           else if (e.type === 'jar') { s.hit.add(e.id); this._breakJar(e); }
@@ -622,8 +715,24 @@ export class Sim {
             this.emit('boulder', { x: e.x });
           }
           break;
-        case 'scarab': case 'mummy': case 'bat': case 'flyer': case 'hopper': {
-          const hw = e.type === 'mummy' ? 0.38 : 0.4, hh = e.type === 'mummy' ? 1.4 : 0.5;
+        case 'torch': if (!e.lit && Math.abs(p.x - e.x) < 1.7 && p.y > e.y - 4.5 && p.y < e.y + 1.5) { e.lit = true; this.emit('ignite', { x: e.x, y: e.y, id: e.id }); } break;
+        case 'boss': {
+          if (e.phase !== 'fight' || e.hidden) break;
+          const D = BOSS_DEF[e.kind], bh = bossHeight(e);
+          const x0 = e.x - D.w / 2, x1 = e.x + D.w / 2;
+          if (e.beam && py0 < e.fy + 1.0 && (px1 < x0 || px0 > x1) && p.x > e.ax0 && p.x < e.ax1) this._hurt(p.x < e.x ? -1 : 1);
+          // a dazed guardian under a ledge can be hit by landing on the ledge right above it
+          const reach = e.vul && p.vy <= 0 ? 0.75 : 0;
+          if (!hit(x0, e.y, x1, e.y + bh + reach)) break;
+          if ((p.vy < -0.5 || (reach && p.landT > 0.15)) && p.y > e.y + bh * 0.55) {
+            // jumping on a dazed guardian hurts it; otherwise the explorer just bounces off
+            if (e.vul && e.inv <= 0) this._bossHit(e); else this.emit('bossBlock', { x: p.x, y: p.y });
+            p.vy = I.jump ? 14.5 : 12; p.jumpsUsed = 0; p.cut = !I.jump; p.y = Math.max(p.y, e.y + bh);
+          } else if (!sun) this._hurt(p.x < e.x ? -1 : 1);
+          break;
+        }
+        case 'scarab': case 'mummy': case 'bat': case 'flyer': case 'hopper': case 'jackal': {
+          const hw = e.type === 'mummy' || e.type === 'jackal' ? 0.38 : 0.4, hh = e.type === 'mummy' || e.type === 'jackal' ? 1.4 : 0.5;
           const by = e.type === 'bat' || e.type === 'flyer' ? e.y - 0.25 : e.y;
           if (hit(e.x - hw, by, e.x + hw, by + hh)) {
             if (sun) { this._defeat(e, 'sun'); break; }
@@ -647,6 +756,11 @@ export class Sim {
       }
     }
     for (const d of this.darts) if (hit(d.x - 0.3, d.y - 0.08, d.x + 0.3, d.y + 0.08)) { d.alive = false; if (!sun) this._hurt(d.vx > 0 ? 1 : -1); }
+    for (const s2 of this.shots) {
+      if (!s2.alive || s2.wait > 0) continue;
+      const r = s2.r || 0.3, rw = s2.kind === 'spear' ? 0.6 : r;
+      if (hit(s2.x - rw, s2.y - r, s2.x + rw, s2.y + r)) { s2.alive = false; if (!sun) this._hurt(s2.vx > 0 ? 1 : s2.vx < 0 ? -1 : (p.x < s2.x ? -1 : 1)); this.emit('shotHit', { x: s2.x, y: s2.y, kind: s2.kind }); }
+    }
     const B = this.boulder;
     if (B && B.active && Math.hypot(p.x - B.x, p.y + 0.7 - (B.y + 1.1)) < 1.6) this._die('boulder');
   }
@@ -687,6 +801,16 @@ export class Sim {
     this.pw.shield = false; this.pw.feather = 0; this.pw.sun = 0;
     this.stick = null;
     if (this.boulder) { const tr = this.boulder.trig; this.boulder = null; if (tr && tr.x > c.x) tr.fired = false; }
+    // a lost guardian fight starts again from the beginning
+    const B = this.boss;
+    if (B && (B.phase === 'intro' || B.phase === 'fight')) {
+      const kind = B.kind; Object.assign(B, { x: B.x0, y: B.y0 }); bossInit(B); B.kind = kind;
+      for (const e of this.ents) if (e.minion && e.alive) e.alive = false;
+      this.shots = [];
+      const g = this.gates.get(B.gid + 1000);
+      if (g && !g.open) { g.open = true; for (let y = g.y; y < g.y + g.h; y++) this.setTile(g.x, y, T.EMPTY); }
+      this.emit('bossReset', { id: B.id });
+    }
     this.emit('respawn', { x: c.x, y: c.y });
   }
 }

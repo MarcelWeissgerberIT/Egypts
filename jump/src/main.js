@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { generateLevel, levelInfo, WORLDS } from './levels.js';
+import { generateLevel, levelInfo, WORLDS, BOSSES } from './levels.js';
 import { Sim } from './sim.js';
 import { Stage } from './render.js';
 import { UI, digitsHTML } from './ui.js';
@@ -26,24 +26,34 @@ async function worldBackground(assets, w) {
   return assets.bg[w];
 }
 
+const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
+async function loadModel(m) {
+  if (!window.__B64_MODELS) return gl.loadAsync(`assets/models/${m}.glb`);
+  const txt = await (await fetch(`assets/models/${m}.glb.txt`)).text();
+  const raw = atob(txt.trim()); const bin = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bin[i] = raw.charCodeAt(i);
+  return gl.parseAsync(bin.buffer, 'assets/models/');
+}
+// a guardian's model is loaded for its level only; the previous one is freed
+async function bossModel(assets, kind) {
+  const key = 'boss_' + kind;
+  for (const k of Object.keys(assets.models)) if (k.startsWith('boss_') && k !== key) {
+    assets.models[k].scene.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+    delete assets.models[k];
+  }
+  if (!assets.models[key]) assets.models[key] = await loadModel(key).catch(() => null);
+}
+
 async function loadAssets(onProgress) {
   const tl = new THREE.TextureLoader();
-  const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
   const assets = { tex: {}, models: {}, img: {}, bg: {} };
   const tex = { sandstone: 'tex/sandstone.jpg', granite: 'tex/granite.jpg', hiero: 'tex/hiero.jpg', glyph: 'tex/glyph.jpg', water: 'tex/water.jpg', sand: 'tex/sand.jpg', dust: 'tex/dust.webp' };
-  const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'obelisk', 'worker_lp', 'anim_lp_walk', 'beetle', 'mummy'];
+  const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'obelisk', 'worker_lp', 'anim_lp_walk', 'beetle', 'mummy', 'jackal'];
   const tex3d = ['icon_scarab', 'papyrus', 'icon_ankh', 'icon_eye', 'sparkle', 'pw_shield', 'pw_feather', 'pw_stick', 'pw_sun', 'sym_ankh', 'sym_lotus', 'sym_djed', 'sym_falcon'];
   const total = Object.keys(tex).length + models.length + tex3d.length;
   let done = 0; const tick = () => onProgress(++done / total);
   const jobs = [];
   for (const [k, f] of Object.entries(tex)) jobs.push(tl.loadAsync('assets/' + f).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.tex[k] = t; }).catch(() => { assets.tex[k] = new THREE.Texture(); }).then(tick));
-  const loadModel = async (m) => {
-    if (!window.__B64_MODELS) return gl.loadAsync(`assets/models/${m}.glb`);
-    const txt = await (await fetch(`assets/models/${m}.glb.txt`)).text();
-    const raw = atob(txt.trim()); const bin = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) bin[i] = raw.charCodeAt(i);
-    return gl.parseAsync(bin.buffer, 'assets/models/');
-  };
   for (const m of models) jobs.push(loadModel(m).then((g) => { assets.models[m] = g; }).catch(() => {}).then(tick));
   for (const n of tex3d) jobs.push(tl.loadAsync(`assets/ui/${n}.webp`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.img[n + 'Tex'] = t; if (n === 'sparkle') assets.img.sparkleTex = t; }).catch(() => {}).then(tick));
   await Promise.all(jobs);
@@ -118,6 +128,7 @@ class Game {
     this.world = world;
     this.state = 'loading'; this.input.enabled = false; this.ui.fadeOut(true);
     await worldBackground(this.assets, world);
+    if (index === 10) await bossModel(this.assets, BOSSES[world - 1]);
     if (token !== this._startToken) return;
     this.L = generateLevel(n);
     this.sim = new Sim(this.L);
@@ -127,7 +138,7 @@ class Game {
     this.ui.intro(world, index, n);
     this.stepT = 0;
     this.ui.setLevel(n);
-    this.ui.setCoins(0); this.ui.setPapyri([false, false, false]); this.ui.setHearts(3, 3);
+    this.ui.setCoins(0); this.ui.setPapyri([false, false, false]); this.ui.setHearts(3, 3); this.ui.boss(null);
     this.ui.show(null);
     this.input.reset();
     this.acc = 0;
@@ -185,6 +196,25 @@ class Game {
         case 'solved': this.later(250, () => this.sfx.solved()); break;
         case 'groan': if (Math.abs(e.x - S.p.x) < 9) this.sfx.groan(Math.abs(e.x - S.p.x)); break;
         case 'hop': if (Math.abs(e.x - S.p.x) < 10) this.sfx.hop(); break;
+        case 'bark': if (Math.abs(e.x - S.p.x) < 12) this.sfx.bark(); break;
+        case 'screech': if (Math.abs(e.x - S.p.x) < 10) this.sfx.screech(); break;
+        case 'spit': this.sfx.spit(); break;
+        case 'ignite': this.sfx.ignite(); break;
+        case 'gateClose': this.sfx.gate(); break;
+        case 'clink': this.sfx.clink(); break;
+        case 'bossStart': this.sfx.bossMusic(true); this.sfx.roar(); this.ui.boss(e.kind, S.boss.hp, S.boss.maxHp); break;
+        case 'bossRoar': this.sfx.roar(0.6); break;
+        case 'bossSlam': case 'bossBump': this.sfx.slam(); this.sfx.boulder(); break;
+        case 'bossShoot': this.sfx.bossShot(e.kind); break;
+        case 'bossRain': this.sfx.rumble(); break;
+        case 'bossSummon': case 'bossVanish': this.sfx.reveal(); break;
+        case 'bossRise': this.sfx.splash(); break;
+        case 'bossHit': this.sfx.bossHit(); this.ui.boss(S.boss.kind, S.boss.hp, S.boss.maxHp); break;
+        case 'bossBlock': this.sfx.clink(); break;
+        case 'bossDie': this.sfx.bossDie(); this.sfx.bossMusic(false); this.ui.boss(S.boss.kind, 0, S.boss.maxHp); break;
+        case 'bossDead': this.ui.boss(null); this.sfx.solved(); break;
+        case 'bossReset': this.sfx.bossMusic(false); this.ui.boss(null); break;
+        case 'shotHit': if (e.kind === 'rock') this.sfx.crack(); break;
         default: break;
       }
     }

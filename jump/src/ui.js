@@ -46,6 +46,9 @@ export class UI {
     const right = el('div', { class: 'grp' }); right.append(this.papyri, this.coinChip, this.lvl);
     this.hud.append(left, right);
     A.append(this.hud);
+    // the guardian's portrait and strength
+    this.bossBar = el('div', { id: 'bossbar' }, `<img class="face" src=""><div class="track"><div class="fill"></div></div>`);
+    A.append(this.bossBar);
     this.tap(this.bPause, 'pause');
     // touch controls
     this.ctrl = el('div', { id: 'ctrl', class: 'hidden' });
@@ -118,6 +121,13 @@ export class UI {
   setCoins(n) { const h = digitsHTML(n, 22); if (this._set('c', h)) this.coinChip.querySelector('.digits').innerHTML = h; }
   setPapyri(found) { const k = found.map((f) => (f ? 1 : 0)).join(''); if (!this._set('p', k)) return; [...this.papyri.children].forEach((e, i) => e.classList.toggle('off', !found[i])); }
   setLevel(n) { this.lvl.querySelector('.digits').innerHTML = digitsHTML(n, n > 99 ? 15 : 19); }
+  boss(kind, hp = 0, max = 1) {
+    if (!kind) { this.bossBar.classList.remove('on'); this._bossKind = null; return; }
+    if (this._bossKind !== kind) { this._bossKind = kind; this.bossBar.querySelector('.face').src = U('boss_' + kind + '.webp'); }
+    this.bossBar.classList.add('on');
+    this.bossBar.querySelector('.fill').style.width = Math.max(0, hp / max * 100) + '%';
+    this.bossBar.classList.remove('hit'); void this.bossBar.offsetWidth; this.bossBar.classList.add('hit');
+  }
   setPowers(w) {
     const k = `${w.shield ? 1 : 0}${w.stick ? 1 : 0}${Math.ceil(w.feather * 2)}|${Math.ceil(w.sun * 2)}`;
     if (!this._set('pw', k)) return;

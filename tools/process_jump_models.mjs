@@ -55,3 +55,27 @@ for (const [src, name] of [['ex_run', 'Run'], ['ex_jump', 'Jump'], ['ex_fall', '
   await io.write(path.join(OUT, 'mummy.glb'), m);
   console.log('mummy', (fs.statSync(path.join(OUT, 'mummy.glb')).size / 1024).toFixed(0) + 'KB');
 }
+
+// the jackal guard and the ten guardians (static SAM 3D meshes, or rigged with a walk/run)
+{
+  const { simplify, weld } = await import('@gltf-transform/functions');
+  const { MeshoptSimplifier } = await import('meshoptimizer');
+  await MeshoptSimplifier.ready;
+  const J = path.join(ROOT, 'art/src/jump');
+  const jobs = [['rig_jackal', 'jackal', true, 768]];
+  for (const k of ['scarabking', 'colossus', 'sobek', 'queen', 'mummylord', 'apep', 'anubis', 'sphinx', 'ammit', 'pharaoh']) {
+    if (fs.existsSync(path.join(J, `rig_boss_${k}.glb`))) jobs.push([`rig_boss_${k}`, `boss_${k}`, true, 1024]);
+    else if (fs.existsSync(path.join(J, `sam_boss_${k}.glb`))) jobs.push([`sam_boss_${k}`, `boss_${k}`, false, 1024]);
+  }
+  for (const [src, out, rigged, tex] of jobs) {
+    const d = await io.read(path.join(J, src + '.glb'));
+    for (const m of d.getRoot().listMaterials()) { m.setAlphaMode('OPAQUE'); m.setDoubleSided(false); m.setMetallicFactor(0.1); }
+    for (const a of d.getRoot().listAnimations()) a.setName('Move');
+    const steps = [weld()];
+    if (!rigged) steps.push(simplify({ simplifier: MeshoptSimplifier, ratio: 0.3, error: 0.003 }));
+    steps.push(dedup(), prune(), resample(), textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [tex, tex], quality: 82 }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+    await d.transform(...steps);
+    await io.write(path.join(OUT, out + '.glb'), d);
+    console.log(out, (fs.statSync(path.join(OUT, out + '.glb')).size / 1024).toFixed(0) + 'KB');
+  }
+}

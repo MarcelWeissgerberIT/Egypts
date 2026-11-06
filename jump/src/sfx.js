@@ -9,7 +9,8 @@ const WORLD_MUSIC = { 0: 'halls', 1: 'halls', 2: 'halls', 3: 'water', 4: 'dark',
 const WORLD_AMB = { 1: ['wind'], 2: ['wind'], 3: ['drips'], 4: ['wind', 'drips'], 5: ['drips', 'wind'], 6: ['wind'], 7: ['wind'], 8: ['wind'], 9: ['wind'], 10: ['wind', 'drips'] };
 const WORLD_VERB = { 1: 0.18, 2: 0.25, 3: 0.4, 4: 0.3, 5: 0.45, 6: 0.22, 7: 0.35, 8: 0.25, 9: 0.5, 10: 0.4 };
 const SAMPLES = ['s_coin', 's_secret', 's_door', 's_crack', 's_splash', 's_jump', 's_boulder', 's_land', 's_stomp', 'a_wind', 'a_drips', 'a_torch', 'fanfare',
-  's_power', 's_powerup', 's_lever', 's_gate', 's_jar', 's_push', 's_solved', 's_wrong', 's_throw', 's_mummy'];
+  's_power', 's_powerup', 's_lever', 's_gate', 's_jar', 's_push', 's_solved', 's_wrong', 's_throw', 's_mummy',
+  's_roar', 's_bosshit', 's_bossdie', 's_fireball', 's_ignite'];
 
 export class Sfx extends Audio {
   ensure() {
@@ -47,6 +48,7 @@ export class Sfx extends Audio {
   setWorld(w) {
     this.world = w;
     this.wantTrack = WORLD_MUSIC[w] || 'halls';
+    this.inBoss = false;
     if (this.ctx) {
       this._music(this.wantTrack);
       this.verbIn.gain.setTargetAtTime(WORLD_VERB[w] || 0.25, this.ctx.currentTime, 0.5);
@@ -154,5 +156,16 @@ export class Sfx extends Audio {
   solved() { this.play('s_solved', { vol: 0.9, wet: 0.6 }) || this.secret(); }
   groan(dist = 4) { this.play('s_mummy', { vol: Math.max(0.15, 0.7 - dist * 0.07), rate: 0.9 + Math.random() * 0.2, wet: 0.6 }); }
   hop() { if (!this.ok()) return; const t = this.ctx.currentTime; const o = this._tone(260, 'sine', t, 0.003, 0.08, 0.08); o.frequency.exponentialRampToValueAtTime(520, t + 0.08); }
+  // guardians, jackals, bats, cobras and torches
+  bossMusic(on) { this.inBoss = on; if (this.ctx) this._music(on ? 'boss' : (this.wantTrack || 'halls')); }
+  roar(vol = 1) { this.play('s_roar', { vol: 0.9 * vol, rate: 0.95 + Math.random() * 0.1, wet: 0.7 }) || this.slam(); }
+  bossHit() { this.play('s_bosshit', { vol: 1, wet: 0.5 }) || this.stomp(); }
+  bossDie() { this.play('s_bossdie', { vol: 1, wet: 0.8 }) || this.boulder(); }
+  bossShot(kind) { if (kind === 'venom' || kind === 'water') this.spit(); else if (kind === 'spear') this.throwStick(); else if (kind !== 'egg') this.play('s_fireball', { vol: 0.75, rate: kind === 'curse' ? 0.8 : 1, wet: 0.5 }); }
+  ignite() { this.play('s_ignite', { vol: 0.8, rate: 0.95 + Math.random() * 0.1, wet: 0.4 }) || this.hiss(); }
+  spit() { if (!this.ok()) return; const t = this.ctx.currentTime; this._noise(t, 0.18, 0.25, 'bandpass', 1800, 2); }
+  clink() { if (!this.ok()) return; const t = this.ctx.currentTime; this._tone(1900, 'triangle', t, 0.002, 0.15, 0.1); this._tone(2850, 'sine', t, 0.002, 0.12, 0.06); }
+  bark() { if (!this.ok()) return; const t = this.ctx.currentTime; const o = this._tone(520, 'sawtooth', t, 0.005, 0.12, 0.12); o.frequency.exponentialRampToValueAtTime(260, t + 0.12); this._noise(t, 0.1, 0.12, 'bandpass', 900, 2); }
+  screech() { if (!this.ok()) return; const t = this.ctx.currentTime; const o = this._tone(2400, 'sine', t, 0.005, 0.18, 0.06); o.frequency.exponentialRampToValueAtTime(3600, t + 0.15); }
   duckMusic(level, time = 0.4) { if (this.musicGain) this.musicGain.gain.setTargetAtTime(0.42 * level, this.ctx.currentTime, time); }
 }

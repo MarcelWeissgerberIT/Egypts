@@ -26,6 +26,13 @@ img { -webkit-user-drag: none; user-select: none; pointer-events: none; display:
 @keyframes pop { 50% { transform: scale(1.3); } }
 #papyri { display: flex; gap: 2px; }
 #powers { display: flex; gap: 4px; }
+#bossbar { position: absolute; z-index: 8; top: calc(var(--sat) + 62px); left: 50%; transform: translateX(-50%); width: min(52vw, 400px); height: 26px; display: none; align-items: center; pointer-events: none; }
+#bossbar.on { display: flex; }
+#bossbar .face { width: 54px; height: 54px; border-radius: 50%; border: 3px solid #e6b54a; background: #2a0c40; object-fit: cover; box-shadow: 0 0 14px rgba(200,90,255,.7); position: relative; z-index: 1; margin-right: -10px; }
+#bossbar .track { flex: 1; height: 20px; border-radius: 10px; background: rgba(36,10,64,.85); border: 2px solid #e6b54a; overflow: hidden; box-shadow: 0 0 0 2px rgba(60,16,100,.7); }
+#bossbar .fill { height: 100%; width: 100%; background: linear-gradient(180deg, #ff7aa8, #c0205a 60%, #8a1040); transition: width .4s; }
+#bossbar.hit .track { animation: pop .35s; }
+#app.dark #vig { background: radial-gradient(ellipse at 50% 55%, rgba(0,0,0,0) 30%, rgba(4,0,10,.55) 70%, rgba(2,0,6,.92) 100%); }
 #powers .pw { position: relative; width: 40px; height: 40px; border-radius: 50%; background: rgba(36,10,64,.82); border: 2px solid #e6b54a; box-shadow: 0 0 10px rgba(255,210,120,.45); --left: 1; }
 #powers .pw img { position: absolute; inset: 3px; width: 30px; height: 30px; object-fit: contain; }
 #powers .pw i { position: absolute; inset: -5px; border-radius: 50%; pointer-events: none; background: conic-gradient(#ffd25a calc(var(--left) * 360deg), rgba(0,0,0,0) 0); -webkit-mask: radial-gradient(circle, transparent 23px, #000 24px); mask: radial-gradient(circle, transparent 23px, #000 24px); }

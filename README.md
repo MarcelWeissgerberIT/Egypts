@@ -43,9 +43,19 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
 
 ## Gegner, Power-ups, Rätsel, Aufstiege
 
-* **Gegner ab dem ersten Level:** Skarabäen (Meta SAM 3D aus einem Higgsfield-Bild), Mumien (SAM 3D,
-  von Meshy geriggt, schlurfender Gang, zweimal draufspringen), hüpfende Käfer, geflügelte Käfer,
-  Fledermäuse und Kobras. Draufspringen, Wurfholz oder Sonnenscheibe besiegen sie.
+* **Sieben Gegner mit eigener Fähigkeit** (3D-Modelle mit Meta SAM 3D aus Higgsfield-Bildern,
+  Menschengestalten von Meshy geriggt):
+  | Gegner | Fähigkeit | ab Welt |
+  |---|---|---|
+  | Skarabäus | läuft Streife, dreht an Kanten um | 1 |
+  | Mumie | verfolgt die Forscherin, braucht zwei Treffer | 1 (ab Level 3) |
+  | Springkäfer | hüpft auf die Forscherin zu | 2 |
+  | Fledermaus | kreist und stürzt sich herab | 3 |
+  | Flugkäfer | fliegt Wellen | 4 |
+  | Schakalkrieger | entdeckt die Forscherin, bellt und stürmt los | 6 |
+  | Kobra | beißt aus der Nähe, spuckt aus der Ferne Gift im Bogen | 8 |
+
+  Draufspringen, Wurfholz oder Sonnenscheibe besiegen sie.
 * **Power-ups** stecken in **Glyphen-Blöcken** (von unten dagegen springen) und in **Tonkrügen**
   (B oder draufspringen); oben links zeigt die Leiste, was aktiv ist:
   * Skarabäus-Amulett: fängt einen Treffer ab
@@ -61,6 +71,34 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
 * **Aufstiege:** hohe Kammern mit Simsen, Leitern und Aufzügen führen nach oben, der Weg geht dort
   weiter; Leitern und Abstiege führen wieder hinunter. Jedes fünfte Level ist ein großer Aufstieg.
 
+## Zehn Bosse
+
+Am Ende jeder Welt (Level 10, 20, … 100) wartet ein Wächter in einer geschlossenen Halle: Hinter der
+Forscherin schließt sich das Tor, oben erscheinen Porträt und Lebensleiste, die Boss-Musik setzt ein.
+Vor der Halle gibt es Amulett und Wurfholz in Glyphen-Blöcken und einen Obelisken. Ein Wächter ist nur
+verwundbar, wenn er nach einem Angriff benommen ist (Sterne über dem Kopf): dann draufspringen oder
+das Wurfholz werfen. In der zweiten Hälfte seiner Kraft wird er schneller. Fällt die Forscherin, beginnt
+der Kampf von vorn.
+
+| Welt | Wächter | Angriffe |
+|---|---|---|
+| 1 | Skarabäuskönig | stürmt gegen die Wand (danach benommen), ruft Käfer |
+| 2 | Steinkoloss | springt und stampft (Schockwellen über den Boden), Steinregen |
+| 3 | Sobek, der Krokodilgott | taucht im Becken unter, taucht anderswo auf, spuckt Wasser |
+| 4 | Käferkönigin | fliegt, wirft Eier (daraus schlüpfen Käfer), stürzt sich herab |
+| 5 | Mumienfürst | ruft Mumien, Fluchkugeln, Stampfen, verschwindet und erscheint gegenüber |
+| 6 | Apep, die Chaosschlange | taucht aus Sandlöchern auf und spuckt Gift im Fächer |
+| 7 | Anubis | stürmt geduckt, wirft den Speer hoch oder tief, Stampfen |
+| 8 | Goldene Sphinx | Strahl über den Boden (auf einen Sims retten), Feuer, Steinregen |
+| 9 | Ammit, die Seelenfresserin | Sprünge mit Schockwellen, Sturmangriff, ruft Springkäfer |
+| 10 | **Der tote Pharao** | schwebt, Fluchkugeln, Sturzflug, Strahl, Steinregen, Teleport, ruft Käfer |
+
+## Dunkelwelt mit Fackellicht
+
+Welt 5 (Mumiengruft) ist fast völlig dunkel: Die Forscherin trägt eine Fackel, die mit ihrer Hand
+mitgeht und flackert, und entzündet im Vorbeigehen die Fackeln an den Wänden, die dann den Gang
+erhellen. Gegner tauchen erst im Lichtschein auf.
+
 ## 10 Welten × 10 Level
 
 | Welt | Ort | Neu |
@@ -69,8 +107,8 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
 | 2 | Hieroglyphenhalle | Leitern, bröckelnde Steine, hüpfende Käfer |
 | 3 | Überflutete Zisterne | Schwimmen, schwebende Steinplatten |
 | 4 | Skarabäennest | Fledermäuse, geflügelte Käfer, Pfeilfallen |
-| 5 | Mumiengruft (dunkel) | Laterne, viele Mumien |
-| 6 | Sandfälle | Treibsand, Sandströme, rollender Felsbrocken |
+| 5 | Mumiengruft (Dunkelwelt) | Fackellicht, viele Mumien |
+| 6 | Sandfälle | Treibsand, Sandströme, rollender Felsbrocken, Schakalkrieger |
 | 7 | Fallenkammern | Stampfer, Feuerdüsen, Aufzüge |
 | 8 | Schatzkammer | **Doppelsprung** (goldene Sandalen), Kobras |
 | 9 | Sternenschacht | **Wandsprung**, senkrechte Schächte |
@@ -98,7 +136,7 @@ node tools/check_levels.mjs
 
 | Ordner | Inhalt |
 |---|---|
-| `jump/src/` | Jump & Run: `levels.js` Welten und Levelgenerator, `sim.js` Physik/Gegner/Fallen, `render.js` 2.5D-Grafik (Three.js), `input.js` Touch, `ui.js` bildbasierte Oberfläche, `main.js` Ablauf |
+| `jump/src/` | Jump & Run: `levels.js` Welten und Levelgenerator, `sim.js` Physik/Gegner/Fallen, `boss.js` die zehn Wächter, `render.js` 2.5D-Grafik (Three.js), `input.js` Touch, `ui.js` bildbasierte Oberfläche, `main.js` Ablauf |
 | `jump/assets/` | Hintergründe, Steintafeln, Texturen, Knöpfe, Power-ups, Symbole, Forscherin, Mumie, Käfer (meshopt-GLB), Klänge |
 | `src/`, `public/` | der Pyramiden-Bauplatz (erstes Spiel) |
 | `tools/` | Build, Bild-/Modell-/Klang-Aufbereitung, Levelprüfung, Balancing |

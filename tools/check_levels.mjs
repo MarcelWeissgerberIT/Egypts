@@ -19,7 +19,7 @@ for (const d of [-1, -0.5, 0, 0.5, 1]) {
 patterns.push({ d: 0, climb: 1 }, { d: 0, climb: -1 }, { d: 1, swim: true }, { d: -1, swim: true }, { d: 0, swim: true }, { d: 0, drop: true });
 
 let bad = 0;
-const PZ = new Set(['lever', 'plate', 'pedestal', 'block']);
+const PZ = new Set(['lever', 'plate', 'pedestal', 'block', 'boss']);
 for (let n = from; n <= to; n++) {
   const L = generateLevel(n);
   // movers become fixed ledges along their whole path for the check
@@ -33,7 +33,7 @@ for (let n = from; n <= to; n++) {
   const LL = { ...L, tiles, ents: [] };
   // gates open once everything that works them (lever, block + plate, pedestals) is reachable
   const gates = L.ents.filter((e) => e.type === 'gate');
-  const opened = new Set();
+  const opened = new Set(gates.filter((g) => g.startOpen).map((g) => g.gid));
   let points = [];
   const near = (e, r = 1.4) => points.some((p) => Math.abs(p.x - e.x) < r && e.y - p.y > -0.6 && e.y - p.y < 3.6);
   for (let round = 0; round <= gates.length; round++) {
