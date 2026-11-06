@@ -37,7 +37,7 @@ const shared = {
     'btn_pause', 'btn_play', 'btn_restart', 'btn_home', 'btn_next', 'btn_sound_on', 'btn_sound_off', 'panel', 'medallion', 'banner_win', 'sparkle', 'hand'].map((n) => n + '.webp'),
   tex: ['water.jpg', 'sand.jpg', 'dust.webp'],
   models: ['obelisk.glb', 'worker_lp.glb', 'anim_lp_walk.glb'],
-  audio: ['music.mp3', 'fanfare.mp3'],
+  audio: ['fanfare.mp3'],
   '.': ['apple-touch-icon.png', 'icon-512.png', 'favicon.png'],
 };
 for (const [dir, files] of Object.entries(shared)) {

@@ -27,7 +27,7 @@ jpg('tex_hiero.png', 'tex/hiero.jpg', (1024, 1024), 84)
 jpg('tex_granite.png', 'tex/granite.jpg', (1024, 1024), 84)
 jpg('map.png', 'ui/map.jpg', (900, 1600), 82)
 jpg('title.png', 'ui/title.jpg', (900, 1600), 82)
-for n, size in [('btn_jump', 220), ('btn_act', 200), ('stick_base', 260), ('stick_knob', 150), ('papyrus', 180), ('logo', 900)]:
+for n, size in [('btn_jump', 220), ('btn_act', 200), ('stick_base', 260), ('stick_knob', 150), ('papyrus', 180), ('logo', 900), ('dpad', 320)]:
     im = trim(Image.open(os.path.join(SRC, n + '.png')).convert('RGBA'))
     r = min(size / im.width, size / im.height, 1)
     im = im.resize((max(1, round(im.width * r)), max(1, round(im.height * r))), Image.LANCZOS)

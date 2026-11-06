@@ -47,13 +47,12 @@ export class UI {
     this.tap(this.bPause, 'pause');
     // touch controls
     this.ctrl = el('div', { id: 'ctrl', class: 'hidden' });
-    this.stickBase = el('div', { id: 'stickBase' }, img('stick_base.webp'));
-    this.stickKnob = el('div', { id: 'stickKnob' }, img('stick_knob.webp'));
+    // Game Boy layout: cross pad left, A (jump) and B (action) right
+    this.dpad = el('div', { id: 'dpad' }, `${img('dpad.webp')}<i class="arm up"></i><i class="arm dn"></i><i class="arm lt"></i><i class="arm rt"></i>`);
     this.jumpBtn = el('div', { id: 'jumpBtn' }, img('btn_jump.webp'));
     this.actBtn = el('div', { id: 'actBtn' }, img('btn_act.webp'));
-    this.ctrl.append(this.stickBase, this.stickKnob, this.jumpBtn, this.actBtn);
+    this.ctrl.append(this.dpad, this.jumpBtn, this.actBtn);
     A.append(this.ctrl);
-    this.showStick(null);
     // effects
     this.fx = el('div', { id: 'fx' }); this.flashEl = el('div', { id: 'flash' }); this.fade = el('div', { id: 'fade' });
     A.append(this.fx, this.flashEl, this.fade);
@@ -121,16 +120,18 @@ export class UI {
   bumpCoins() { this.coinChip.classList.remove('pop'); void this.coinChip.offsetWidth; this.coinChip.classList.add('pop'); }
 
   // ---------------- controls
-  showStick(s, dx = 0, dy = 0) {
-    if (!s) { this.stickBase.classList.add('idle'); this.stickKnob.classList.add('idle'); this.stickBase.style.left = ''; this.stickBase.style.top = ''; this.stickKnob.style.left = ''; this.stickKnob.style.top = ''; this.stickKnob.style.transform = ''; return; }
-    this.stickBase.classList.remove('idle'); this.stickKnob.classList.remove('idle');
-    this.stickBase.style.left = s.ox + 'px'; this.stickBase.style.top = s.oy + 'px';
-    this.stickKnob.style.left = s.ox + 'px'; this.stickKnob.style.top = s.oy + 'px';
-    this.stickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  setPad(x, y) {
+    const k = x + ',' + y;
+    if (this._pad === k) return;
+    this._pad = k;
+    const d = this.dpad;
+    d.classList.toggle('up', y > 0); d.classList.toggle('dn', y < 0); d.classList.toggle('lt', x < 0); d.classList.toggle('rt', x > 0);
+    d.style.transform = `perspective(400px) rotateX(${-y * 9}deg) rotateY(${x * 9}deg)`;
   }
+  padCenter() { const r = this.dpad.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 }; }
   pressJump(on) { this.jumpBtn.classList.toggle('down', on); }
-  pressAction() { this.actBtn.classList.remove('hit'); void this.actBtn.offsetWidth; this.actBtn.classList.add('hit'); }
-  actionRect() { const r = this.actBtn.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 } : null; }
+  pressB(on) { this.actBtn.classList.toggle('down', on); }
+  buttonRect(which) { const r = (which === 'a' ? this.jumpBtn : this.actBtn).getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 } : null; }
   glowAction(on) { this.actBtn.classList.toggle('glow', on); }
 
   // ---------------- map + worlds
@@ -180,6 +181,13 @@ export class UI {
   // ---------------- first-level hints: a hand shows the stick, the jump button and the action button
   hint(kind) {
     this.hand.className = kind ? 'on ' + kind : '';
+  }
+
+  // a world/level card at the start of each level
+  intro(w, i, n) {
+    if (!this.introEl) { this.introEl = el('div', { id: 'intro' }); this.app.append(this.introEl); }
+    this.introEl.innerHTML = `<div class="med">${img('medallion.webp')}<div class="digits">${digitsHTML(w, 30)}</div></div>${img('icon_ankh.webp', 'sep')}<div class="digits big">${digitsHTML(n, 40)}</div>`;
+    this.introEl.classList.remove('on'); void this.introEl.offsetWidth; this.introEl.classList.add('on');
   }
 
   // ---------------- effects

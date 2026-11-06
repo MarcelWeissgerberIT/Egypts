@@ -11,14 +11,33 @@ Alle Bilder, Hintergründe, Steintafeln und Knöpfe sind mit **Higgsfield** erze
 **Meshy**-3D-Modell mit Rig und eigenen Animationen (Laufen, Springen, Fallen, Klettern, Schwimmen,
 Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist ein Bild.
 
-## Steuerung (Touch)
+## Steuerung (Touch, wie beim Game Boy)
 
-* **Linke Bildschirmhälfte:** Daumen auflegen und ziehen, ein schwebender Stick erscheint dort, wo der
-  Daumen liegt (laufen, Leitern hoch/runter, nach unten + Springen fällt durch Holzplanken).
-* **Rechte Bildschirmhälfte:** irgendwo tippen = **Springen** (länger halten = höher). Großzügige
-  Sprungtoleranz (Absprung kurz nach der Kante und Sprung kurz vor der Landung zählen trotzdem).
-* **Hand-Knopf:** rissige Steine aufbrechen (er leuchtet, wenn einer in der Nähe ist).
+* **Steuerkreuz links unten:** laufen, Leitern hoch/runter, „runter“ + Springen fällt durch Holzplanken.
+  Der Daumen kann über das Kreuz gleiten (8 Richtungen), jede Berührung der linken Hälfte zählt.
+* **A (Pfeil, rechts oben):** Springen, länger halten = höher. Großzügige Sprungtoleranz.
+* **B (Hand, links unten davon):** rissige Steine aufbrechen (leuchtet, wenn einer in der Nähe ist).
+  Der Daumen kann von B auf A rutschen. Jede Berührung der rechten Hälfte zählt für den näheren Knopf.
 * Auf dem Rechner: Pfeiltasten/WASD, Leertaste, E.
+
+## Atmosphäre und Klang
+
+* Fünf eigene Musikstücke (Higgsfield/ElevenLabs Music): Hallen, Zisterne, Gruft, Wüstensturm,
+  Sternenschacht; sie wechseln mit der Welt und überblenden sich nahtlos in der Schleife.
+* Umgebungsklänge (Wind in den Gängen, Wassertropfen, knisternde Fackeln je nach Nähe) und
+  aufgenommene Effekte (Mirelo SFX) für Münzen, Papyrus, Steintür, Bruch, Wasser, Sprung, Landung,
+  Felsbrocken; alles läuft durch einen Steinhallen-Hall, der je nach Welt größer wird. Schritte folgen
+  der Laufanimation.
+* Jede Welt hat eigene Schwebeteilchen (Sonnenstaub, Wasserdunst, Glühwürmchen, Sandwehen, Glut,
+  Goldglitzer, Sternenfunkeln), Fackeln leuchten mit Lichthof, jedes Level beginnt mit einer Welt-Karte.
+
+## iPhone
+
+* Hintergründe werden pro Welt geladen, beim Levelwechsel wird der Grafikspeicher freigegeben.
+* Hält ein Gerät die Bildrate nicht, sinkt die Auflösung stufenweise, dann fallen Schatten weg.
+* Ton läuft nach dem ersten Tippen auf Start; das Spiel meldet sich als Wiedergabe an, damit der
+  Lautlos-Schalter es auf neueren iOS-Versionen (ab 17) nicht stummschaltet.
+* Am besten quer halten und über „Teilen → Zum Home-Bildschirm“ als Vollbild-App starten.
 
 ## 10 Welten × 10 Level
 

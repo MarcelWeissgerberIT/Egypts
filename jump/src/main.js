@@ -17,6 +17,15 @@ function loadSave() {
 }
 function writeSave(s) { try { localStorage.setItem(SAVE, JSON.stringify(s)); } catch (e) { /* ignore */ } }
 
+// one painted background per world, loaded when needed; only the current and the next stay in memory
+const bgLoader = new THREE.TextureLoader();
+async function worldBackground(assets, w) {
+  if (!assets.bg[w]) assets.bg[w] = await bgLoader.loadAsync(`assets/bg/w${w}.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; return t; }).catch(() => new THREE.Texture());
+  for (const k of Object.keys(assets.bg)) if (+k !== w && +k !== w + 1) { assets.bg[k].dispose(); delete assets.bg[k]; }
+  if (w < 10 && !assets.bg[w + 1]) bgLoader.loadAsync(`assets/bg/w${w + 1}.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.bg[w + 1] = t; }).catch(() => {});
+  return assets.bg[w];
+}
+
 async function loadAssets(onProgress) {
   const tl = new THREE.TextureLoader();
   const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
@@ -24,11 +33,10 @@ async function loadAssets(onProgress) {
   const tex = { sandstone: 'tex/sandstone.jpg', granite: 'tex/granite.jpg', hiero: 'tex/hiero.jpg', water: 'tex/water.jpg', sand: 'tex/sand.jpg', dust: 'tex/dust.webp' };
   const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'obelisk', 'worker_lp', 'anim_lp_walk'];
   const tex3d = ['icon_scarab', 'papyrus', 'icon_ankh', 'sparkle'];
-  const total = Object.keys(tex).length + models.length + tex3d.length + 10;
+  const total = Object.keys(tex).length + models.length + tex3d.length;
   let done = 0; const tick = () => onProgress(++done / total);
   const jobs = [];
   for (const [k, f] of Object.entries(tex)) jobs.push(tl.loadAsync('assets/' + f).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.tex[k] = t; }).catch(() => { assets.tex[k] = new THREE.Texture(); }).then(tick));
-  for (let w = 1; w <= 10; w++) jobs.push(tl.loadAsync(`assets/bg/w${w}.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.bg[w] = t; }).catch(() => {}).then(tick));
   const loadModel = async (m) => {
     if (!window.__B64_MODELS) return gl.loadAsync(`assets/models/${m}.glb`);
     const txt = await (await fetch(`assets/models/${m}.glb.txt`)).text();
@@ -92,24 +100,32 @@ class Game {
   _resize() { const w = window.innerWidth, h = window.innerHeight; this.stage.resize(w, h); this.ui.inGame(this.state === 'play' || this.state === 'pause'); }
 
   openMap() {
-    this.state = 'map'; this.ui.inGame(false);
+    this.state = 'map'; this.ui.inGame(false); this.sfx.setWorld(0); this.sfx.setAmbience(false);
     const worlds = Math.min(10, Math.floor((this.save.unlocked - 1) / 10) + 1);
     this.ui.buildMap(this.save, worlds);
     this.ui.show('sMap');
   }
   openWorld(w) {
-    this.world = w; this.state = 'world'; this.ui.inGame(false);
+    this.world = w; this.state = 'world'; this.ui.inGame(false); this.sfx.setWorld(w); this.sfx.setAmbience(false);
     this.ui.buildWorld(w, this.save, this.save.unlocked);
     this.ui.show('sWorld');
   }
 
-  startLevel(n) {
+  async startLevel(n) {
+    const token = (this._startToken = (this._startToken || 0) + 1);
     this.n = n;
-    const { world } = levelInfo(n);
+    const { world, index } = levelInfo(n);
     this.world = world;
+    this.state = 'loading'; this.input.enabled = false; this.ui.fadeOut(true);
+    await worldBackground(this.assets, world);
+    if (token !== this._startToken) return;
     this.L = generateLevel(n);
     this.sim = new Sim(this.L);
     this.stage.load(this.L, this.sim);
+    this.sfx.setWorld(world); this.sfx.setAmbience(true);
+    this.ui.fadeOut(false);
+    this.ui.intro(world, index, n);
+    this.stepT = 0;
     this.ui.setLevel(n);
     this.ui.setCoins(0); this.ui.setPapyri([false, false, false]); this.ui.setHearts(3, 3);
     this.ui.show(null);
@@ -133,20 +149,21 @@ class Game {
       switch (e.type) {
         case 'jump': this.sfx.jump(); this._jumped = true; break;
         case 'djump': case 'walljump': this.sfx.djump(); break;
-        case 'land': if (e.v > 10) this.sfx.land(); break;
+        case 'land': if (e.v > 5) this.sfx.land(); break;
         case 'coin': this.sfx.coin(); this.ui.bumpCoins(); break;
         case 'papyrus': this.sfx.secret(); this.ui.bumpPapyrus(e.id); this.ui.flash(); break;
         case 'heal': this.sfx.ankh(); break;
         case 'stomp': case 'stompHit': this.sfx.stomp(); break;
         case 'hurt': this.sfx.hurt(); break;
-        case 'die': this.sfx.loseLife(); break;
+        case 'die': this.sfx.loseLife(); this.later(e.why === 'pit' ? 350 : 700, () => this.ui.fadeOut(true)); break;
+        case 'respawn': this.ui.fadeOut(false); break;
         case 'splash': case 'swim': this.sfx.splash(); break;
         case 'break': this.sfx.crack(); if (this.hintsDone) this.hintsDone['action' + this.n] = true; break;
         case 'crumble': this.sfx.rumble(); break;
         case 'dart': if (Math.abs(e.x - S.p.x) < 14) this.sfx.dart(); break;
         case 'slam': if (Math.abs(e.x - S.p.x) < 12) this.sfx.slam(); break;
         case 'hiss': this.sfx.hiss(); break;
-        case 'boulder': this.sfx.rumble(); this.sfx.slam(); break;
+        case 'boulder': this.sfx.boulder(); break;
         case 'checkpoint': this.sfx.ankh(); break;
         case 'win': this.sfx.door(); this.later(600, () => this.sfx.fanfare()); this._won(); break;
         default: break;
@@ -168,6 +185,17 @@ class Game {
     if (!kind && S.tile(p.x, p.y + 0.5) === 4 && !p.climb && !H.climb) kind = 'climb';
     if (p.climb) H.climb = true;
     if (this._hint !== kind) { this._hint = kind; this.ui.hint(kind); }
+  }
+
+  // adaptive quality: a phone that cannot hold the frame rate gets fewer pixels, then no shadows
+  _perf(dt) {
+    const P = this.perf || (this.perf = { n: 0, sum: 0, level: 2 });
+    P.n++; if (P.n > 30) P.sum += dt;
+    if (P.n >= 150) {
+      const avg = P.sum / 120;
+      if (avg > 1 / 40 && P.level > 0) { P.level--; this.stage.setQuality(P.level); }
+      P.n = 0; P.sum = 0;
+    }
   }
 
   later(ms, fn) { const n = this.n, s = this.sim; setTimeout(() => { if (this.sim === s && this.n === n) fn(); }, ms); }
@@ -213,6 +241,15 @@ class Game {
       for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1; dy++) if (S.tile(p.x + dx, p.y + 0.5 + dy) === 8) { near = true; break; }
       this.ui.glowAction(near);
       this._hints(near);
+      // footsteps follow the running animation; torches crackle when the explorer is near
+      if (p.state === 'run' && p.ground) {
+        this.stepT -= dt * (0.75 + 0.35 * Math.min(1, Math.abs(p.vx) / 7.2));
+        if (this.stepT <= 0) { this.stepT = 0.25; this.sfx.footstep(S.p.sand); }
+      } else this.stepT = 0.05;
+      let near2 = 99;
+      for (const tc of this.stage.torches || []) { const d = Math.abs(tc.position.x - p.x) + Math.abs(tc.position.y - p.y - 1); if (d < near2) near2 = d; }
+      this.sfx.setAmbience(true, Math.max(0, 1 - near2 / 5));
+      this._perf(dt);
     }
     if (this.sim && this.state !== 'title' && this.state !== 'map' && this.state !== 'world' && this.state !== 'loading') this.stage.update(dt, this.state === 'pause' || this.state === 'power' ? 0 : gdt || dt * 0);
     else if (this.sim && (this.state === 'world' || this.state === 'map')) { /* keep the last frame */ }

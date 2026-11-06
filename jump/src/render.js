@@ -27,17 +27,24 @@ class Actor {
   }
 }
 
-// remove the hips' drift so clips stay on the spot (the game moves the explorer)
-function inplace(clip, keepY = true) {
+// remove the hips' drift so clips stay on the spot (the game moves the explorer). fixY pins the
+// height too (jump/climb clips lift the body on their own, which would add to the physics)
+function inplace(clip, keepY = true, fixY = null) {
   if (!clip) return clip;
   clip = clip.clone();
   for (const tr of clip.tracks) {
     if (!/Hips\.position$/.test(tr.name)) continue;
     const v = tr.values, n = v.length / 3;
-    const x0 = v[0], z0 = v[2], y0 = v[1];
+    const x0 = v[0], z0 = v[2], y0 = fixY ?? v[1];
     for (let i = 0; i < n; i++) { v[i * 3] = x0; v[i * 3 + 2] = z0; if (!keepY) v[i * 3 + 1] = y0; }
   }
   return clip;
+}
+// a time window of a clip (seconds)
+function cut(clip, name, t0, t1) {
+  if (!clip) return clip;
+  const fps = 30;
+  return THREE.AnimationUtils.subclip(clip, name, Math.round(t0 * fps), Math.round(t1 * fps), fps);
 }
 
 export class Stage {
@@ -51,6 +58,9 @@ export class Stage {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+    canvas.addEventListener('webglcontextrestored', () => location.reload());
+    this.mobile = matchMedia('(pointer: coarse)').matches;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 200);
     this.cam = { x: 0, y: 6, dist: 16 };
@@ -72,7 +82,7 @@ export class Stage {
     this.hemi = new THREE.HemisphereLight(0xd8c0ff, 0x6a4020, 1.0); this.scene.add(this.hemi);
     const key = new THREE.DirectionalLight(0xffe2b8, 2.0);
     key.position.set(-6, 14, 12); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(this.mobile ? 1024 : 2048, this.mobile ? 1024 : 2048);
     const sc = key.shadow.camera; sc.left = -18; sc.right = 18; sc.top = 14; sc.bottom = -14; sc.near = 1; sc.far = 60;
     key.shadow.bias = -0.0005; key.shadow.normalBias = 0.03;
     this.scene.add(key); this.scene.add(key.target); this.key = key;
@@ -121,7 +131,9 @@ export class Stage {
     for (let i = 0; i < n; i++) { pos[i * 3] = Math.random() * 40 - 20; pos[i * 3 + 1] = Math.random() * 24 - 6; pos[i * 3 + 2] = Math.random() * 10 - 6; }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.motes = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.09, color: 0xffe2a8, transparent: true, opacity: 0.7, depthWrite: false, map: glow, blending: THREE.AdditiveBlending }));
+    this.motes.frustumCulled = false;
     this.scene.add(this.motes);
+    this.moteV = new Float32Array(n * 3);
   }
 
   spawn(type, x, y, z, { vx = 0, vy = 0, vz = 0, life = 1, size = 0.4, grow = 0, color = 0xffffff, gravity = 0, opacity = 1, map = null, additive = null } = {}) {
@@ -151,9 +163,16 @@ export class Stage {
     root.scale.multiplyScalar(1.5 / 1.6);
     const g = new THREE.Group(); g.add(root); this.scene.add(g);
     const clip = (n) => A['anim_' + n]?.animations?.[0];
+    // the Meshy jump is one long move (crouch, take-off, flight, landing): cut it into phases
+    const idle = A.explorer.animations[0];
+    const hipY = idle.tracks.find((t) => /Hips\.position$/.test(t.name))?.values[1] ?? 87;
+    const jump = clip('jump');
     this.pl = new Actor(root, {
-      Idle: A.explorer.animations[0], Run: inplace(clip('run')), Jump: inplace(clip('jump')), Fall: inplace(clip('fall')),
-      Climb: inplace(clip('climb')), Swim: inplace(clip('swim'), false), Hit: inplace(clip('hit')), Cheer: inplace(clip('cheer')),
+      Idle: idle, Run: inplace(clip('run')),
+      Jump: inplace(cut(jump, 'JumpUp', 0.5, 0.82), false, hipY),
+      Fall: inplace(cut(jump, 'JumpDown', 0.84, 1.08), false, hipY),
+      Land: inplace(cut(jump, 'Land', 1.12, 1.62)),
+      Climb: inplace(clip('climb'), false, hipY), Swim: inplace(clip('swim'), false), Hit: inplace(clip('hit')), Cheer: inplace(clip('cheer')),
     });
     this.pl.group = g;
     this.pl.play('Idle');
@@ -165,8 +184,22 @@ export class Stage {
   }
 
   // ------------------------------------------------------------ level build
+  _dispose(root) {
+    const shared = new Set(Object.values(this.texs).concat(Object.values(this.A.tex), Object.values(this.A.bg || {}), Object.values(this.A.img)));
+    root.traverse((o) => {
+      if (o.geometry && !o.userData.sharedGeo) o.geometry.dispose();
+      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+      for (const m of mats) {
+        if (m.userData && m.userData.shared) continue;
+        for (const k of ['map', 'alphaMap']) if (m[k] && !shared.has(m[k]) && m[k] !== this.flameTex && m[k] !== this.rayTex && m[k] !== this.crackTex && m[k] !== this.linenTex && m[k] !== this.ptex.glow) m[k].dispose();
+        if (![this.gold, this.bronze, this.wood, this.darkWood].includes(m)) m.dispose();
+      }
+    });
+  }
+
   load(L, sim) {
     this.L = L; this.sim = sim;
+    this._dispose(this.level);
     this.level.clear();
     this.entViews = new Map();
     this.crumbleViews = new Map();
@@ -181,6 +214,12 @@ export class Stage {
     this.key.intensity = W.dark ? 0.5 : 1.4 + W.amb * 0.6;
     this.rim.color.set(W.sky);
     this.lantern.intensity = W.dark ? 26 : 0;
+    // floating particles that set the mood of each world
+    const MOOD = { entrance: [0xffe2a8, 0.09, 0, 0.15], hieroglyphs: [0xffd8f0, 0.08, 0.05, 0.1], cistern: [0x9ff4ff, 0.11, 0, 0.45], scarabs: [0xd090ff, 0.1, 0.1, 0.2],
+      crypt: [0x9cff9c, 0.12, 0.05, 0.08], sandfalls: [0xffc070, 0.13, 1.6, -0.2], traps: [0xff8040, 0.1, 0.1, 0.6], treasury: [0xffe060, 0.1, 0, 0.12], stars: [0xc8d8ff, 0.12, 0, 0.05], king: [0xff90e0, 0.11, 0.05, 0.3] };
+    const [mc, ms, wind, rise] = MOOD[W.key] || MOOD.entrance;
+    this.motes.material.color.set(mc); this.motes.material.size = ms; this.mood = { wind, rise, twinkle: W.key === 'stars' || W.key === 'treasury' };
+    for (let i = 0; i < this.moteV.length; i += 3) { this.moteV[i] = wind * (0.6 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.2; this.moteV[i + 1] = rise * (0.5 + Math.random()) + (Math.random() - 0.5) * 0.1; this.moteV[i + 2] = 0; }
     this._blocks(L);
     this._backdrop(L);
     this._entities(L);
@@ -317,6 +356,8 @@ export class Stage {
           const holder = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.08, 0.35, 8), this.bronze); v.add(holder);
           const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flameTex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false })); fl.position.y = 0.42; fl.scale.set(0.5, 0.8, 1); v.add(fl);
           v.userData.flame = fl;
+          const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: 0xffa040, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
+          halo.position.y = 0.45; halo.scale.set(2.4, 2.4, 1); v.add(halo); v.userData.halo = halo;
           v.position.set(e.x, e.y, -1.5); this.torches.push(v); break;
         }
         case 'checkpoint': {
@@ -454,7 +495,7 @@ export class Stage {
       case 'papyrus': { this.level.children.forEach(() => {}); this.burst(e.x, e.y, 22, 0xd08cff, 4); for (const [id, v] of this.entViews) { const en = this.sim.ents[id]; if (en.type === 'papyrus' && !en.alive) v.visible = false; } break; }
       case 'heal': { for (const [id, v] of this.entViews) { const en = this.sim.ents[id]; if (en.type === 'ankh' && !en.alive) v.visible = false; } this.burst(e.x, e.y, 12, 0x80ffb0); break; }
       case 'stomp': { const v = this.entViews.get(e.id); if (v) v.userData.dying = 0.35; this.dust(e.x, e.y, 8); this.burst(e.x, e.y, 10, 0xffe0a0); break; }
-      case 'land': if (e.v > 8) this.dust(e.x, e.y, 5); break;
+      case 'land': this.landT = 0.32; if (e.v > 8) this.dust(e.x, e.y, 5); break;
       case 'jump': this.dust(e.x, e.y, 3); break;
       case 'djump': this.burst(e.x, e.y + 0.2, 10, 0xffd860, 2.5); break;
       case 'walljump': this.dust(e.x, e.y, 4); break;
@@ -485,15 +526,18 @@ export class Stage {
     this.plYaw += dy * Math.min(1, dt * 14);
     g.rotation.y = p.state === 'climb' ? Math.PI : this.plYaw;
     const anim = { idle: 'Idle', run: 'Run', jump: 'Jump', fall: 'Fall', climb: 'Climb', swim: 'Swim', hurt: 'Hit', win: 'Cheer' }[p.state] || 'Idle';
-    if (p.dead > 0) this.pl.play('Hit', { once: true });
-    else if (anim === 'Run') this.pl.play('Run', { speed: Math.max(0.5, Math.abs(p.vx) / P.RUN) * 1.05 });
-    else if (anim === 'Climb') this.pl.play('Climb', { speed: Math.abs(p.vy) > 0.2 ? 1 : 0.0001 });
-    else if (anim === 'Jump') this.pl.play('Jump', { once: true, speed: 1.5 });
-    else this.pl.play(anim);
+    if (this.landT > 0) this.landT -= gdt;
+    if (p.dead > 0) this.pl.play('Hit', { once: true, fade: 0.1 });
+    else if (anim === 'Run') this.pl.play('Run', { speed: 0.75 + 0.35 * Math.min(1, Math.abs(p.vx) / P.RUN), fade: this.landT > 0 ? 0.12 : 0.18 });
+    else if (anim === 'Climb') this.pl.play('Climb', { speed: Math.abs(p.vy) > 0.2 || Math.abs(p.vx) > 0.2 ? 1.1 : 0.0001 });
+    else if (anim === 'Jump') this.pl.play('Jump', { once: true, speed: 1.0, fade: 0.08 });
+    else if (anim === 'Fall') this.pl.play('Fall', { once: true, speed: 0.9, fade: 0.2 });
+    else if (anim === 'Idle' && this.landT > 0) this.pl.play('Land', { once: true, speed: 1.4, fade: 0.06 });
+    else this.pl.play(anim, { fade: 0.2 });
     g.visible = p.dead > 0 ? Math.floor(this.time * 20) % 2 === 0 && p.dead > 0.6 : !(p.inv > 0 && Math.floor(this.time * 16) % 2 === 0);
-    const sq = p.landT > 0 ? 1 - p.landT * 0.5 : 1;
-    if (p.landT > 0) p.landT -= dt;
-    g.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq));
+    // swimming is done lying in the water; running leans a little into the speed
+    g.position.y += p.state === 'swim' ? 0.42 : 0;
+    this.pl.root.rotation.x = p.state === 'run' ? Math.min(0.12, Math.abs(p.vx) * 0.014) : 0;
     this.pl.mixer.update(gdt);
     // blob shadow on the ground below
     const gy = S.groundTop(p.x, p.y + 0.5);
@@ -529,7 +573,7 @@ export class Stage {
           break;
         }
         case 'sandfall': v.userData.tex.offset.y += dt * 1.6; if (Math.random() < dt * 8) this.spawn('dust', e.x + (Math.random() - 0.5) * 1.2, e.y + 0.1, 0.6, { vx: (Math.random() - 0.5) * 2, vy: 0.6, life: 0.8, size: 0.5, grow: 1, opacity: 0.6, color: 0xe8c088, additive: false }); break;
-        case 'torch': { const fl = v.userData.flame; const s = 0.5 + Math.sin(this.time * 17 + e.x) * 0.05; fl.scale.set(s, s * 1.6, 1); break; }
+        case 'torch': { const fl = v.userData.flame; const s = 0.5 + Math.sin(this.time * 17 + e.x) * 0.05; fl.scale.set(s, s * 1.6, 1); v.userData.halo.material.opacity = 0.35 + Math.sin(this.time * 11 + e.x * 3) * 0.08; break; }
         default: break;
       }
     }
@@ -579,8 +623,16 @@ export class Stage {
     this.key.position.set(c.x - 6, c.y + 12, 12); this.key.target.position.set(c.x, c.y - 3, 0);
     const ts = this.torches.map((t) => ({ t, d: Math.abs(t.position.x - c.x) + Math.abs(t.position.y - c.y) * 0.5 })).sort((a, b) => a.d - b.d);
     this.torchLights.forEach((l, i) => { const q = ts[i]; if (q && q.d < 16) { l.position.copy(q.t.position).add(tmpV.set(0, 0.6, 0.6)); l.intensity = (this.L.theme.dark ? 14 : 7) * (0.9 + Math.sin(this.time * 13 + i) * 0.1); } else l.intensity = 0; });
-    this.motes.position.set(c.x, c.y, 0);
-    this.motes.rotation.z = Math.sin(this.time * 0.05) * 0.1;
+    // motes drift with the world's mood and wrap around the view
+    const mp = this.motes.geometry.attributes.position.array, mv = this.moteV;
+    for (let i = 0; i < mp.length; i += 3) {
+      mp[i] += mv[i] * gdt + Math.sin(this.time * 0.7 + i) * 0.002; mp[i + 1] += mv[i + 1] * gdt;
+      if (mp[i] < c.x - 20) mp[i] += 40; else if (mp[i] > c.x + 20) mp[i] -= 40;
+      if (mp[i + 1] < c.y - 10) mp[i + 1] += 22; else if (mp[i + 1] > c.y + 12) mp[i + 1] -= 22;
+    }
+    this.motes.geometry.attributes.position.needsUpdate = true;
+    this.motes.position.set(0, 0, 0);
+    this.motes.material.opacity = this.mood && this.mood.twinkle ? 0.55 + Math.sin(this.time * 3) * 0.25 : 0.7;
     // particles
     for (const q of this.pool) {
       if (q.life <= 0) continue;
@@ -598,14 +650,18 @@ export class Stage {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     // keep ~11 tiles of height in landscape and at least ~10 tiles of width in portrait
-    const hv = Math.max(9.2, 10 / this.camera.aspect);
+    const hv = Math.max(8.2, 9.4 / this.camera.aspect);
     this.cam.dist = hv / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2));
     this.camera.updateProjectionMatrix();
   }
 
   setQuality(q) {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q ? 2 : 1.25));
-    this.key.shadow.mapSize.set(q ? 2048 : 1024, q ? 2048 : 1024);
-    if (this.key.shadow.map) { this.key.shadow.map.dispose(); this.key.shadow.map = null; }
+    const dpr = window.devicePixelRatio || 1;
+    this.renderer.setPixelRatio(Math.min(dpr, q >= 2 ? 2 : q === 1 ? 1.5 : 1.1));
+    this.key.castShadow = q >= 1;
+    this.torchLights.forEach((l, i) => { l.visible = q >= 1 || i < 2; });
+    this.motes.visible = q >= 1;
+    this.resize(this.renderer.domElement.clientWidth || window.innerWidth, this.renderer.domElement.clientHeight || window.innerHeight);
   }
+
 }
