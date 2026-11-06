@@ -1,12 +1,73 @@
-# Purpursonne Pyramide
+# Purpurpyramide
+
+Ein Jump & Run für iPhone und iPad (Touch, am besten quer): Eine Forscherin erkundet in
+**100 aufeinander aufbauenden Leveln** eine riesige Pyramide und lüftet ihre zehn Geheimnisse.
+
+**Spielen:** https://marcelweissgerberit.github.io/Egypts/
+(auf dem iPhone in Safari öffnen, dann „Teilen → Zum Home-Bildschirm“ für Vollbild)
+Das erste Spiel, der Pyramiden-Bauplatz, liegt jetzt unter https://marcelweissgerberit.github.io/Egypts/builder/
+
+Alle Bilder, Hintergründe, Steintafeln und Knöpfe sind mit **Higgsfield** erzeugt, die Forscherin ist ein
+**Meshy**-3D-Modell mit Rig und eigenen Animationen (Laufen, Springen, Fallen, Klettern, Schwimmen,
+Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist ein Bild.
+
+## Steuerung (Touch)
+
+* **Linke Bildschirmhälfte:** Daumen auflegen und ziehen, ein schwebender Stick erscheint dort, wo der
+  Daumen liegt (laufen, Leitern hoch/runter, nach unten + Springen fällt durch Holzplanken).
+* **Rechte Bildschirmhälfte:** irgendwo tippen = **Springen** (länger halten = höher). Großzügige
+  Sprungtoleranz (Absprung kurz nach der Kante und Sprung kurz vor der Landung zählen trotzdem).
+* **Hand-Knopf:** rissige Steine aufbrechen (er leuchtet, wenn einer in der Nähe ist).
+* Auf dem Rechner: Pfeiltasten/WASD, Leertaste, E.
+
+## 10 Welten × 10 Level
+
+| Welt | Ort | Neu |
+|---|---|---|
+| 1 | Sonnige Eingangshalle | Laufen, Springen, Gruben, Stacheln |
+| 2 | Hieroglyphenhalle | Leitern, bröckelnde Steine, Skarabäen (draufspringen) |
+| 3 | Überflutete Zisterne | Schwimmen, schwebende Steinplatten |
+| 4 | Skarabäennest | Fledermäuse, Pfeilfallen |
+| 5 | Mumiengruft (dunkel) | Laterne, Mumien (zweimal draufspringen) |
+| 6 | Sandfälle | Treibsand, Sandströme, rollender Felsbrocken |
+| 7 | Fallenkammern | Stampfer, Feuerdüsen, Aufzüge |
+| 8 | Schatzkammer | **Doppelsprung** (goldene Sandalen), Kobras |
+| 9 | Sternenschacht | **Wandsprung**, senkrechte Schächte |
+| 10 | Königskammer | alles zusammen, das letzte Geheimnis |
+
+In jedem Level liegen **drei Papyrusfetzen** versteckt (hinter rissigen Bodenplatten, auf hohen
+Simsen, in Kellern unter Holzplanken), sie geben die Horusaugen des Levels. Nach Level 10 jeder Welt
+wird eine **Steintafel** mit einem Geheimnis der Pyramide enthüllt; die Tafeln bleiben im Weltraum
+abrufbar. Ankh-Herzen: drei Treffer, dann geht es am letzten Obelisken (Kontrollpunkt) weiter.
+
+Die Level werden aus festen Bausteinen mit festem Startwert erzeugt (gleiches Level bei jedem Spiel).
+`tools/check_levels.mjs` spielt jedes Level mit der echten Spielphysik durch (Rennen, Springen, kurze
+Hüpfer, Doppelsprung, Leitern, Schwimmen) und prüft, dass Ausgang und alle drei Papyri erreichbar
+sind: alle 100 Level bestehen.
+
+## Entwickeln
+
+```bash
+npm install
+npm run build              # dist/ = Purpurpyramide, dist/builder/ = Pyramiden-Bauplatz
+node tools/serve.cjs dist  # http://localhost:8080
+node tools/check_levels.mjs
+```
+
+| Ordner | Inhalt |
+|---|---|
+| `jump/src/` | Jump & Run: `levels.js` Welten und Levelgenerator, `sim.js` Physik/Gegner/Fallen, `render.js` 2.5D-Grafik (Three.js), `input.js` Touch, `ui.js` bildbasierte Oberfläche, `main.js` Ablauf |
+| `jump/assets/` | Hintergründe, Steintafeln, Texturen, Knöpfe, Forscherin (meshopt-GLB) |
+| `src/`, `public/` | der Pyramiden-Bauplatz (erstes Spiel) |
+| `tools/` | Build, Bild-/Modell-Aufbereitung, Levelprüfung, Balancing |
+
+---
+
+# Erstes Spiel: Pyramiden-Bauplatz (/builder/)
 
 Isometrisches Aufbauspiel für das iPhone (Safari / Home-Bildschirm): Vorkommen erschließen, Wege bauen, Pyramide errichten.
 
-**Spielen:** https://marcelweissgerberit.github.io/Egypts/
-(auf dem iPhone in Safari öffnen, dann „Teilen → Zum Home-Bildschirm“ für Vollbild) Alle Grafiken, Icons,
-Ziffern, 3D-Figuren, Musik und Fanfare wurden mit **Higgsfield** erzeugt, die 3D-Modelle,
-Rigs und Animationen mit **Meshy** (über Higgsfield). Im Spiel gibt es keine Schrift: jede
-Beschriftung, jede Zahl und jeder Knopf ist ein Bild.
+**Spielen:** https://marcelweissgerberit.github.io/Egypts/builder/
 
 ## Spielprinzip – Vorkommen erschließen, Wege bauen, Pyramide errichten
 
@@ -66,13 +127,6 @@ Herausforderung: Regierungszeit des Pharaos (Sonnenleiste), Hunger-Streiks ohne 
 Fristen sind mit `tools/balance_sim.mjs` eingestellt (ein Bot, der Vorkommen erschließt, Wege
 legt und Träger einstellt).
 
-## Entwickeln
-
-```bash
-npm install
-npm run build              # bündelt src/ nach dist/
-node tools/serve.cjs dist  # http://localhost:8080
-```
 
 | Ordner | Inhalt |
 |---|---|
