@@ -882,6 +882,7 @@ export class Stage {
       case 'blockLand': this.dust(e.x, e.y, 6, 0xd8b890); this.shake = 0.08; break;
       case 'blockReset': this.burst(e.x + 0.5, e.y + 0.5, 14, 0xc090ff, 2.5); break;
       case 'hop': this.dust(e.x, e.y, 2); break;
+      case 'powerLand': this.dust(e.x, e.y, 4, 0xffe0a0); this.burst(e.x, e.y + 0.5, 6, 0xfff0a0, 1.5); break;
       case 'ignite': this.burst(e.x, e.y + 0.5, 12, 0xffa040, 2.2); break;
       case 'gateClose': this.shake = 0.15; this.dust(e.x, e.y, 8, 0xd8b890); break;
       case 'spawn': this.burst(e.x, e.y + 0.4, 10, 0xb070ff, 2.2); this.dust(e.x, e.y, 4); break;
@@ -998,7 +999,7 @@ export class Stage {
         case 'pedestal': { const u = v.userData; u.glow.material.opacity = e.lit ? 0.75 + Math.sin(this.time * 5) * 0.15 : 0; u.plq.material.color.set(e.lit ? 0xffffff : 0xb8a890); u.plq.position.y = 1.55 + (e.lit ? Math.sin(this.time * 3) * 0.05 : 0); break; }
         case 'power': {
           v.visible = e.alive && !e.hidden;
-          if (v.visible) { v.position.y = e.y - (e.rise || 0) * 1.6 + Math.sin(this.time * 3 + e.id) * 0.08; v.userData.glow.material.opacity = 0.5 + Math.sin(this.time * 5) * 0.2; v.userData.glow.material.rotation = this.time; }
+          if (v.visible) { v.position.x = e.x; v.position.y = e.y - (e.rise || 0) * 1.6 + (e.moving ? 0 : Math.sin(this.time * 3 + e.id) * 0.08); v.userData.glow.material.opacity = 0.5 + Math.sin(this.time * 5) * 0.2; v.userData.glow.material.rotation = this.time; }
           break;
         }
         case 'jar': break;

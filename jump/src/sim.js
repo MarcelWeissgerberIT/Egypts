@@ -570,7 +570,37 @@ export class Sim {
         case 'fire': { const ph = (e.t + (e.phase || 0)) % e.period; e.warn = ph < 0.45; e.burning = ph >= 0.45 && ph < 0.45 + e.on; break; }
         case 'itemblock': if (e.bounce > 0) e.bounce -= dt; break;
         case 'boss': bossStep(this, e, dt); break;
-        case 'power': if (!e.hidden && e.rise > 0) e.rise = Math.max(0, e.rise - dt); break;
+        case 'power': {
+          if (e.hidden) break;
+          if (e.rise > 0) {
+            e.rise = Math.max(0, e.rise - dt);
+            // out of a glyph block it slides to the nearest spot beside the block where it can drop
+            // to the floor (the top of the block is higher than a jump), on the explorer's side first
+            const b = this.ents[e.src];
+            if (e.rise === 0 && b && b.type === 'itemblock') {
+              const first = p.x >= e.x ? 1 : -1;
+              let tx = null;
+              for (const side of [first, -first]) {
+                for (let c = 1; c <= 5 && tx === null; c++) {
+                  const cx = b.x + side * c;
+                  if (this.solidAt(cx, b.y + 1)) break;          // it slides over neighbouring blocks
+                  if (this.groundTop(cx + 0.5, b.y + 0.5) < b.y) tx = cx + 0.5;
+                }
+                if (tx !== null) break;
+              }
+              if (tx !== null) { e.moving = true; e.tx = tx; e.vy = 0; }
+            }
+            break;
+          }
+          if (!e.moving) break;
+          if (Math.abs(e.tx - e.x) > 0.02) { e.x += Math.sign(e.tx - e.x) * Math.min(Math.abs(e.tx - e.x), 2.6 * dt); break; }
+          e.x = e.tx;
+          e.vy = Math.max(-12, e.vy - 25 * dt);
+          const gt = this.groundTop(e.x, e.y - 0.5);
+          e.y += e.vy * dt;
+          if (e.y - 0.55 <= gt) { e.y = gt + 0.55; e.vy = 0; e.moving = false; this.emit('powerLand', { x: e.x, y: gt, id: e.id }); }
+          break;
+        }
         case 'gate':
           if (e.opening !== undefined && !e.open) {
             e.opening -= dt;
