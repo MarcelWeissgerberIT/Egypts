@@ -16,7 +16,8 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
 * **Steuerkreuz links unten:** laufen, Leitern hoch und runter (oben auf der Leiter „runter“ drücken),
   gerade nach unten halten + Springen fällt durch Holzplanken, im Stehen hoch/runter halten schaut nach
   oben/unten. Springt die Forscherin gegen eine Kante, die etwas zu hoch ist (Mauer, Glyphen-Block,
-  Steinblock), greift sie zu und zieht sich hoch.
+  Steinblock), **greift sie zu und hängt** daran: hoch, A oder zur Wand drücken klettert hinauf,
+  runter oder weg lässt los. Niedrige Kanten steigt sie direkt hinauf.
   Der Daumen kann über das Kreuz gleiten (8 Richtungen), jede Berührung der linken Hälfte zählt.
 * **A (Pfeil, rechts oben):** Springen, länger halten = höher. Großzügige Sprungtoleranz.
 * **B (Hand, links unten davon):** rissige Steine aufbrechen, Hebel ziehen, Symbolsäulen drücken,
@@ -100,6 +101,14 @@ der Kampf von vorn.
 Welt 5 (Mumiengruft) ist fast völlig dunkel: Die Forscherin trägt eine Fackel, die mit ihrer Hand
 mitgeht und flackert, und entzündet im Vorbeigehen die Fackeln an den Wänden, die dann den Gang
 erhellen. Gegner tauchen erst im Lichtschein auf.
+
+## Jedes Level sieht anders aus
+
+Jede Welt hat zwei gemalte Hintergründe und zwei bis drei Steinarten (Sandstein, weißer Kalkstein mit
+Goldfugen, Lehmziegel, Granit, Basalt); die Level einer Welt wechseln zwischen ihnen. Dazu kommen je
+Level eine leicht andere Lichtfarbe, Banner in der Farbe der Welt und eine eigene Auswahl an Statuen
+und Dingen am Wegrand (sitzender Pharao, Anubis auf dem Schrein, Lotusvase, Sarkophag, Feuerschale,
+Dattelpalme, Schatztruhe, Bastet-Katze, umgestürzte Säule; Meta SAM 3D aus Higgsfield-Bildern).
 
 ## 10 Welten × 10 Level
 

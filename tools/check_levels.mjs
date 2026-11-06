@@ -4,7 +4,7 @@
 // Enemies and timed traps are ignored; moving platforms count as ledges along their whole path.
 // Run: node tools/check_levels.mjs [from] [to]
 import { generateLevel, T } from '../jump/src/levels.js';
-import { Sim } from '../jump/src/sim.js';
+import { Sim, P } from '../jump/src/sim.js';
 
 const from = +process.argv[2] || 1, to = +process.argv[3] || 100;
 const H = 1 / 60;
@@ -72,7 +72,7 @@ function explore(LL, L) {
     for (const pt of patterns) {
       if ((pt.dbl && !L.abilities.double)) continue;
       const S = new Sim(LL);
-      S.p.x = s0.x; S.p.y = s0.y; S.p.vx = (pt.late ? 0 : pt.d * 7.2); S.p.ground = true;
+      S.p.x = s0.x; S.p.y = s0.y; S.p.vx = (pt.late ? 0 : pt.d * P.RUN); S.p.ground = true;
       S.check = { x: s0.x, y: s0.y };
       let t = 0, landed = null;
       for (let k = 0; k < 150; k++) {

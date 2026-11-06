@@ -26,6 +26,10 @@ jpg('tex_sandstone.png', 'tex/sandstone.jpg', (1024, 1024), 84)
 jpg('tex_hiero.png', 'tex/hiero.jpg', (1024, 1024), 84)
 jpg('tex_granite.png', 'tex/granite.jpg', (1024, 1024), 84)
 jpg('tex_glyph.png', 'tex/glyph.jpg', (512, 512), 86)
+for t in ('limestone', 'mudbrick', 'basalt'):
+    jpg(f'tex_{t}.png', f'tex/{t}.jpg', (1024, 1024), 84)
+for i in range(1, 11):
+    jpg(f'bg{i}b.png', f'bg/w{i}b.jpg', (1600, 900), 80)
 jpg('map.png', 'ui/map.jpg', (900, 1600), 82)
 jpg('title.png', 'ui/title.jpg', (900, 1600), 82)
 for n, size in [('btn_jump', 220), ('btn_act', 200), ('stick_base', 260), ('stick_knob', 150), ('papyrus', 180), ('logo', 900), ('dpad', 320),

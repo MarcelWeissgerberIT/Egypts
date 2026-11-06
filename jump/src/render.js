@@ -18,14 +18,15 @@ class Actor {
     this.root = root; this.mixer = new THREE.AnimationMixer(root); this.actions = {}; this.current = null;
     for (const [n, c] of Object.entries(clips)) if (c) this.actions[n] = this.mixer.clipAction(c);
   }
-  play(name, { fade = 0.15, once = false, speed = 1 } = {}) {
+  play(name, { fade = 0.15, once = false, speed = 1, pingpong = false } = {}) {
     const a = this.actions[name];
-    if (!a) return;
-    if (this.current === a) { a.setEffectiveTimeScale(speed); return; }
-    a.reset(); a.setEffectiveTimeScale(speed); a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+    if (!a) return false;
+    if (this.current === a) { a.setEffectiveTimeScale(speed); return true; }
+    a.reset(); a.setEffectiveTimeScale(speed); a.setLoop(once ? THREE.LoopOnce : pingpong ? THREE.LoopPingPong : THREE.LoopRepeat, Infinity);
     a.clampWhenFinished = once; a.enabled = true; a.setEffectiveWeight(1);
     if (this.current) a.crossFadeFrom(this.current, fade, false); else a.fadeIn(fade);
     a.play(); this.current = a;
+    return true;
   }
 }
 
@@ -70,7 +71,7 @@ export class Stage {
     this.shake = 0;
     this.level = new THREE.Group(); this.scene.add(this.level);
     this.texs = {};
-    for (const k of ['sandstone', 'granite', 'hiero', 'glyph']) {
+    for (const k of ['sandstone', 'granite', 'limestone', 'mudbrick', 'basalt', 'hiero', 'glyph']) {
       const t = assets.tex[k]; if (!t) continue; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; this.texs[k] = t;
     }
     this.focus = null; this.lookY = 0; this.look = 0;
@@ -206,7 +207,11 @@ export class Stage {
       Fall: inplace(cut(jump, 'JumpDown', 0.84, 1.08), false, hipY),
       Land: inplace(cut(jump, 'Land', 1.12, 1.62)),
       Climb: inplace(clip('climb'), false, hipY), Swim: inplace(clip('swim'), false), Hit: inplace(clip('hit')), Cheer: inplace(clip('cheer')),
+      // hanging from an edge (the settled end of a grab) and climbing over it (with its own rise)
+      Hang: clip('hang') ? inplace(cut(clip('hang'), 'Hang', 1.55, 2.0)) : null,
+      ClimbUp: clip('climbup') ? cut(clip('climbup'), 'ClimbUp', 0.15, 3.1) : null,
     });
+    this.climbUpLen = 2.95;
     this.pl.group = g;
     this.pl.play('Idle');
     this.hand = null;
@@ -245,19 +250,29 @@ export class Stage {
     this.level.clear();
     this.entViews = new Map();
     this.crumbleViews = new Map();
-    this.focus = null; this.stickView = null; this.beamView = null;
+    this.focus = null; this.stickView = null; this.beamView = null; this.bannerTex = null;
     this.crackViews = new Map();
     const W = L.theme;
-    const tex = this.texs[W.tex].clone(); tex.needsUpdate = true; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    this.blockMat = new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, roughness: 0.88, color: W.tex === 'granite' ? new THREE.Color(W.tint).lerp(new THREE.Color(0xffffff), 0.45).multiplyScalar(1.6) : new THREE.Color(W.tint).multiplyScalar(0.86) });
+    // the level's stone: each world cycles through a few kinds, tinted by the world's light
+    const st = L.style || { tex: W.tex };
+    const texKey = this.texs[st.tex] ? st.tex : W.tex;
+    const tex = this.texs[texKey].clone(); tex.needsUpdate = true; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const tint = new THREE.Color(W.tint), white = new THREE.Color(0xffffff);
+    const blockCol = { granite: tint.clone().lerp(white, 0.45).multiplyScalar(1.6), basalt: tint.clone().lerp(white, 0.6).multiplyScalar(2.1), limestone: tint.clone().lerp(white, 0.6).multiplyScalar(0.95), mudbrick: tint.clone().lerp(white, 0.55) }[texKey] || tint.clone().multiplyScalar(0.86);
+    this.blockMat = new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, roughness: 0.88, color: blockCol });
     const sand = this.A.tex.sand.clone(); sand.needsUpdate = true; sand.wrapS = sand.wrapT = THREE.RepeatWrapping; sand.colorSpace = THREE.SRGBColorSpace;
-    this.topMat = new THREE.MeshStandardMaterial({ map: W.tex === 'granite' ? tex : sand, vertexColors: true, roughness: 0.95, color: W.tex === 'granite' ? new THREE.Color(W.tint).lerp(new THREE.Color(0xffffff), 0.5).multiplyScalar(1.7) : new THREE.Color(0xffe6c0) });
+    const stoneTop = texKey === 'granite' || texKey === 'basalt';
+    this.topMat = new THREE.MeshStandardMaterial({ map: stoneTop ? tex : sand, vertexColors: true, roughness: 0.95, color: stoneTop ? tint.clone().lerp(white, 0.5).multiplyScalar(texKey === 'basalt' ? 2.2 : 1.7) : new THREE.Color({ limestone: 0xfff4e4, mudbrick: 0xffd4a8 }[texKey] || 0xffe6c0) });
     const torchlit = !!W.torchlit;
     this.torchlit = torchlit;
     this.scene.fog = new THREE.Fog(W.fog, torchlit ? 8 : 26, torchlit ? 32 : 80);
     this.hemi.intensity = torchlit ? 0.14 : 0.55 + W.amb * 0.55;
     this.key.intensity = torchlit ? 0.1 : W.dark ? 0.5 : 1.4 + W.amb * 0.6;
-    this.rim.color.set(W.sky); this.rim.intensity = torchlit ? 0.25 : 0.9;
+    // each level's light is a little different: hue and brightness
+    const hue = (L.style && L.style.hue) || 0, light = (L.style && L.style.light) || 1;
+    this.rim.color.set(W.sky).offsetHSL(hue, 0, 0); this.rim.intensity = torchlit ? 0.25 : 0.9;
+    this.scene.fog.color.offsetHSL(hue, 0, 0);
+    this.hemi.intensity *= light; this.hemi.color.set(0xd8c0ff).offsetHSL(hue * 1.5, 0, 0);
     this.lantern.intensity = W.dark && !torchlit ? 26 : 0;
     this.handTorch.g.visible = torchlit; this.handTorch.fl.material.map = this.flameTex; this.handTorch.halo.material.map = this.ptex.glow;
     this.handLight.intensity = torchlit ? 34 : 0;
@@ -357,7 +372,7 @@ export class Stage {
   _backdrop(L) {
     const W = L.theme;
     // far painting, moved with the camera (parallax)
-    const bgTex = this.A.bg[L.world]; bgTex.colorSpace = THREE.SRGBColorSpace;
+    const bgTex = this.A.bg[L.style ? L.style.bg : 'w' + L.world] || this.A.bg['w' + L.world] || new THREE.Texture(); bgTex.colorSpace = THREE.SRGBColorSpace;
     this.far = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: bgTex, fog: false, depthWrite: false, color: W.torchlit ? 0x2a2038 : 0xffffff }));
     this.far.renderOrder = -10; this.level.add(this.far);
     // rows of carved pillars between the painting and the level
@@ -376,7 +391,9 @@ export class Stage {
     for (let x = 0; x < L.w + 20; x += 17) pillar(x + 7, -11, 1.4, L.h + 12, -4);
     // low wall right behind the path, stepping with the ground
     const floorAt = (x) => { let k = 0; while (k < L.h && L.tiles[k * L.w + x] === T.SOLID) k++; return k; };
-    const wallMat = new THREE.MeshStandardMaterial({ map: this.texs.hiero, color: new THREE.Color(W.tint).multiplyScalar(0.55), roughness: 1 });
+    // the carved back wall takes on the colour of the level's stone
+    const wallCol = { limestone: new THREE.Color(0xfff0dc).multiplyScalar(0.78), mudbrick: new THREE.Color(0xd08a60).multiplyScalar(0.62), basalt: new THREE.Color(0x8a7ab0).multiplyScalar(0.42) }[L.style && L.style.tex] || new THREE.Color(W.tint).multiplyScalar(0.55);
+    const wallMat = new THREE.MeshStandardMaterial({ map: this.texs.hiero, color: wallCol, roughness: 1 });
     for (let x0 = 0; x0 < L.w; x0 += 6) {
       let fy = 99; for (let x = x0; x < Math.min(L.w, x0 + 6); x++) fy = Math.min(fy, floorAt(x));
       const w = Math.min(6, L.w - x0), y0 = fy - 2.5, h = 6.5;
@@ -523,6 +540,8 @@ export class Stage {
           v.userData.glow = glow; v.userData.plq = plq; v.position.set(e.x, e.y, 0); break;
         }
         case 'tablet': v = this._tablet(e); break;
+        case 'prop': v = this._prop(e); break;
+        case 'banner': v = this._banner(e); break;
         case 'jar': {
           v = new THREE.Group();
           const prof = [[0.001, 0], [0.16, 0.02], [0.27, 0.14], [0.31, 0.32], [0.27, 0.5], [0.15, 0.64], [0.11, 0.72], [0.15, 0.8], [0.13, 0.84], [0.001, 0.84]].map(([a, b]) => new THREE.Vector2(a, b));
@@ -796,6 +815,55 @@ export class Stage {
     } else if (this.beamView) this.beamView.visible = false;
   }
 
+  // statues, vases, palms, braziers and treasure standing behind the path
+  _prop(e) {
+    const H = { pharaoh: 3.1, anubis: 1.9, vase: 1.45, sarcophagus: 2.6, brazier: 1.35, palm: 2.5, treasure: 1.1, cat: 1.7, column: 1.8 }[e.kind] || 1.5;
+    const src = this.A.models['prop_' + e.kind];
+    const g = new THREE.Group();
+    if (!src) return g;
+    const o = src.scene.clone(true);
+    o.traverse((m) => {
+      if (!m.isMesh) return;
+      m.castShadow = true; m.receiveShadow = true; m.userData.sharedGeo = true;
+      if (!m.material.userData.tuned) { m.material.metalness = e.kind === 'treasure' || e.kind === 'sarcophagus' ? 0.35 : 0.08; m.material.roughness = 0.6; m.material.userData.tuned = true; }
+      m.material.userData.shared = true;
+    });
+    const box = new THREE.Box3().setFromObject(o), size = box.getSize(new THREE.Vector3());
+    const sc = H / size.y;
+    o.scale.setScalar(sc); o.position.set(-(box.min.x + size.x / 2) * sc, -box.min.y * sc, -(box.min.z + size.z / 2) * sc);
+    const piv = new THREE.Group(); piv.add(o); piv.rotation.y = e.yaw || 0; piv.scale.z = H > 2 ? 0.7 : 1; g.add(piv);
+    if (e.kind === 'brazier') {
+      const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flameTex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false })); fl.position.y = H + 0.3; fl.scale.set(0.8, 1.1, 1); g.add(fl);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: 0xffa040, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false })); halo.position.y = H + 0.3; halo.scale.set(3, 3, 1); g.add(halo);
+      g.userData.flame = fl; g.userData.halo = halo; g.userData.ent = { lit: true };
+      this.torches.push(g);
+    }
+    g.position.set(e.x, e.y, -0.62);
+    return g;
+  }
+
+  // cloth banners hanging on the back wall in the world's colour
+  _banner(e) {
+    if (!this.bannerTex) {
+      const col = (this.L.style && this.L.style.banner) || '#7a2ab0', eye = this.A.img.icon_eyeTex?.image;
+      this.bannerTex = canvasTex(96, 256, (c, w, h) => {
+        c.fillStyle = col; c.fillRect(6, 0, w - 12, h - 30);
+        c.beginPath(); c.moveTo(6, h - 30); c.lineTo(w / 2, h - 4); c.lineTo(w - 6, h - 30); c.fill();
+        const g = c.createLinearGradient(0, 0, w, 0); g.addColorStop(0, 'rgba(0,0,0,0.35)'); g.addColorStop(0.5, 'rgba(255,255,255,0.08)'); g.addColorStop(1, 'rgba(0,0,0,0.35)'); c.fillStyle = g; c.fillRect(6, 0, w - 12, h - 30);
+        c.fillStyle = '#e8b840'; c.fillRect(6, 10, w - 12, 6); c.fillRect(6, h - 48, w - 12, 5);
+        for (let y = 30; y < h - 60; y += 22) { c.fillStyle = 'rgba(232,184,64,0.5)'; c.fillRect(14, y, 4, 10); c.fillRect(w - 18, y, 4, 10); }
+        if (eye) c.drawImage(eye, w / 2 - 30, 70, 60, 60);
+        c.fillStyle = '#ffd25a'; c.beginPath(); c.arc(w / 2, 170, 9, 0, 7); c.fill();
+      });
+    }
+    const g = new THREE.Group();
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 6), this.gold); rod.rotation.z = Math.PI / 2; rod.position.y = 1.15; g.add(rod);
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 2.3), new THREE.MeshStandardMaterial({ map: this.bannerTex, transparent: true, side: THREE.DoubleSide, roughness: 0.9 }));
+    g.add(cloth); g.userData.cloth = cloth;
+    g.position.set(e.x, e.y, -1.5);
+    return g;
+  }
+
   // the stone tablet that shows the order of the symbols
   _tablet(e) {
     const n = e.seq.length, cw = 220 * n + 60, ch = 300;
@@ -925,15 +993,19 @@ export class Stage {
     // explorer
     const g = this.pl.group;
     g.position.set(p.x, p.y, 0);
-    const want = (p.state === 'climb' ? 0 : p.state === 'win' ? 0.2 : p.face * (Math.PI / 2 - 0.42));
+    // hanging and climbing over an edge face the wall
+    const side = p.hang ? p.hang.side : p.mSide || p.face;
+    const want = p.state === 'hang' || p.state === 'climbup' ? side * (Math.PI / 2 - 0.12) : p.state === 'climb' ? 0 : p.state === 'win' ? 0.2 : p.face * (Math.PI / 2 - 0.42);
     let dy = want - this.plYaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
-    this.plYaw += dy * Math.min(1, dt * 14);
+    this.plYaw += dy * Math.min(1, dt * (p.state === 'hang' || p.state === 'climbup' ? 30 : 14));
     g.rotation.y = p.state === 'climb' ? Math.PI : this.plYaw;
     const anim = { idle: 'Idle', run: 'Run', push: 'Run', jump: 'Jump', fall: 'Fall', climb: 'Climb', mantle: 'Climb', swim: 'Swim', hurt: 'Hit', win: 'Cheer' }[p.state] || 'Idle';
     if (this.landT > 0) this.landT -= gdt;
     if (p.dead > 0) this.pl.play('Hit', { once: true, fade: 0.1 });
     else if (p.state === 'push') this.pl.play('Run', { speed: 0.42, fade: 0.2 });
     else if (p.state === 'mantle') this.pl.play('Climb', { speed: 2.2, fade: 0.06 });
+    else if (p.state === 'hang') { if (!this.pl.play('Hang', { fade: 0.12, pingpong: true, speed: 0.8 })) this.pl.play('Climb', { speed: 0.0001 }); }
+    else if (p.state === 'climbup') { if (!this.pl.play('ClimbUp', { once: true, fade: 0.12, speed: this.climbUpLen / (p.mDur || 0.95) })) this.pl.play('Climb', { speed: 1.6 }); }
     else if (anim === 'Run') this.pl.play('Run', { speed: 0.75 + 0.35 * Math.min(1, Math.abs(p.vx) / P.RUN), fade: this.landT > 0 ? 0.12 : 0.18 });
     else if (anim === 'Climb') this.pl.play('Climb', { speed: Math.abs(p.vy) > 0.2 || Math.abs(p.vx) > 0.2 ? 1.1 : 0.0001 });
     else if (anim === 'Jump') this.pl.play('Jump', { once: true, speed: 1.0, fade: 0.08 });
@@ -943,6 +1015,13 @@ export class Stage {
     g.visible = p.dead > 0 ? Math.floor(this.time * 20) % 2 === 0 && p.dead > 0.6 : !(p.inv > 0 && Math.floor(this.time * 16) % 2 === 0);
     // swimming is done lying in the water; running leans a little into the speed
     g.position.y += p.state === 'swim' ? 0.42 : 0;
+    // hanging: the hands reach forward to the edge; climbing over: the clip carries the body up and
+    // forward from a fixed anchor, ending where the explorer then stands
+    if (p.state === 'hang') { g.position.x -= p.hang.side * 0.39; this.climbAnchor = null; }
+    else if (p.state === 'climbup' && this.pl.actions.ClimbUp) {
+      if (!this.climbAnchor) this.climbAnchor = { x: p.mTo.x - p.mSide * 0.89, y: p.mTo.y - 0.98 };
+      g.position.set(this.climbAnchor.x, this.climbAnchor.y, 0);
+    } else this.climbAnchor = null;
     this.pl.root.rotation.x = p.state === 'run' ? Math.min(0.12, Math.abs(p.vx) * 0.014) : p.state === 'push' ? 0.3 : 0;
     this.pl.mixer.update(gdt);
     // blob shadow on the ground below
@@ -1014,6 +1093,8 @@ export class Stage {
           break;
         }
         case 'jar': break;
+        case 'banner': v.userData.cloth.rotation.y = Math.sin(this.time * 0.9 + e.x) * 0.12; v.userData.cloth.position.z = Math.sin(this.time * 1.3 + e.x) * 0.03; break;
+        case 'prop': if (v.userData.flame) { const s2 = 0.85 + Math.sin(this.time * 15 + e.x) * 0.08; v.userData.flame.scale.set(0.8 * s2, 1.1 * s2, 1); } break;
         case 'cobra': { v.rotation.y = e.dir > 0 ? 0 : Math.PI; const n = v.userData.neck; n.rotation.z = (e.strike > 0 ? -0.9 : Math.sin(this.time * 2) * 0.12); n.position.x = e.strike > 0 ? 0.35 : 0; break; }
         case 'mover': v.position.set(e.x + e.w / 2, e.y - 0.21, 0); break;
         case 'crusher': { const b = e.y - 1 - (e.k || 0) * e.drop; v.position.y = b; v.userData.chain.scale.y = 1 + (e.k || 0) * e.drop; v.userData.chain.position.y = 1 + ((e.k || 0) * e.drop + 1) / 2; break; }

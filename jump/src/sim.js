@@ -6,13 +6,15 @@ import { BOSS_DEF, bossInit, bossStep, bossHeight } from './boss.js';
 
 export const P = {
   W: 0.62, H: 1.36,
-  RUN: 7.2, ACC_G: 60, ACC_A: 38, FRIC: 70,
+  RUN: 6.4, ACC_G: 56, ACC_A: 30, FRIC: 70,
   GRAV: 40, JUMP: 15.6, CUT: 6.0, MAX_FALL: 20,
   DJUMP: 13.8, WALL_SLIDE: 3.2, WALL_JUMP_X: 8.2,
   COYOTE: 0.11, BUFFER: 0.14,
   LADDER: 4.6,
   SWIM_GRAV: 11, SWIM_MAX: 3.6, SWIM_STROKE: 6.8,
   FEATHER_T: 25, SUN_T: 10, GLIDE: 2.4,
+  HANG: 1.53,                  // from the hands on the edge down to the feet while hanging
+  CLIMB_UP: 0.95,              // seconds to climb from hanging onto the edge
 };
 const EPS = 1e-4;
 const solidT = (t) => t === T.SOLID || t === T.CRACKED || t === T.CRUMBLE || t === T.GATE || t === T.BLOCK || t === T.ITEM;
@@ -61,7 +63,7 @@ export class Sim {
   _newPlayer(x, y) {
     return { x, y, vx: 0, vy: 0, face: 1, ground: false, coyote: 0, buffer: 0, jumpsUsed: 0, climb: false, swim: false, sand: false, wall: 0,
       inv: 0, hurtT: 0, dead: 0, ride: null, lockX: 0, landT: 0, cut: false, state: 'idle', drop: 0, pushT: 0, pullT: 0, pullV: 0, glide: false,
-      downT: 0, mantle: 0, regrab: 0 };
+      downT: 0, mantle: 0, regrab: 0, hang: null };
   }
 
   emit(type, o = {}) { this.events.push({ type, ...o }); }
@@ -111,8 +113,9 @@ export class Sim {
     // only a deliberate straight "down" (held a moment) lets the explorer drop through planks
     p.downT = I.y < -0.55 && Math.abs(I.x) < 0.5 ? p.downT + dt : 0;
     if (p.regrab > 0) p.regrab -= dt;
-    // pulling herself up over an edge
+    // pulling herself up over an edge, or hanging from it
     if (p.mantle > 0) { this._mantleStep(dt); return; }
+    if (p.hang) { this._hangStep(dt, I); return; }
     // medium under the explorer
     const mid = this.tile(p.x, p.y + P.H * 0.45), feet = this.tile(p.x, p.y + 0.15), head = this.tile(p.x, p.y + P.H - 0.15);
     const wasSwim = p.swim;
@@ -204,9 +207,9 @@ export class Sim {
       p.pushT += dt;
       if (p.pushT > 0.14) { if (this._push(bb.x, bb.y, bb.dir)) p.pushT = -0.12; else p.pushT = 0.1; }
     } else if (p.pushT > 0 || !bb) p.pushT = 0;
-    // jumping against an edge that is a little too high: grab it and pull up
-    if (!p.ground && !p.climb && !p.swim && ax && p.vy < 5 && p.regrab <= 0 && p.hurtT <= 0) this._tryMantle(Math.sign(ax));
-    if (p.mantle > 0) return;
+    // jumping against an edge that is a little too high: grab it, hang, climb up
+    if (!p.ground && !p.climb && !p.swim && ax && p.vy < 5 && p.regrab <= 0 && p.hurtT <= 0) this._tryGrab(Math.sign(ax));
+    if (p.mantle > 0 || p.hang) return;
     // falling out of the world
     if (p.y < -2) this._die('pit');
     // animation state
@@ -221,7 +224,7 @@ export class Sim {
     p.lastVy = p.vy;
   }
 
-  _tryMantle(side) {
+  _tryGrab(side) {
     const p = this.p;
     const cx = Math.floor(p.x + side * (P.W / 2 + 0.1));
     const lo = Math.ceil(p.y + 0.7), hi = Math.floor(p.y + P.H + 0.6);
@@ -234,23 +237,49 @@ export class Sim {
       let free = true;
       for (let c = Math.floor(tx - P.W / 2); c <= Math.floor(tx + P.W / 2); c++) if (this.solidAt(c, ty) || this.solidAt(c, ty + 1)) free = false;
       if (!free) continue;
-      p.mantle = 0.34; p.mFrom = { x: p.x, y: p.y }; p.mTo = { x: tx, y: ty }; p.face = side;
-      p.vx = 0; p.vy = 0; p.ride = null;
-      this.emit('mantle', { x: p.x, y: p.y, side });
+      p.face = side; p.vx = 0; p.vy = 0; p.ride = null;
+      // a low edge is simply stepped up; a high one is grabbed and she hangs from it
+      const hx = side > 0 ? cx - P.W / 2 - 0.02 : cx + 1 + P.W / 2 + 0.02, hy = ty - P.HANG;
+      let room = ty - p.y > 1.0;
+      for (let c = Math.floor(hx - P.W / 2); room && c <= Math.floor(hx + P.W / 2); c++) for (let r = Math.floor(hy); r <= Math.floor(hy + P.H); r++) if (this.solidAt(c, r) || this.tile(c + 0.5, r + 0.5) === T.ONEWAY) room = false;
+      if (room) {
+        p.hang = { side, cx, ty, tx, t: 0 }; p.x = hx; p.y = hy;
+        this.emit('grab', { x: p.x, y: ty, side });
+      } else {
+        p.mantle = p.mDur = 0.34; p.mFrom = { x: p.x, y: p.y }; p.mTo = { x: tx, y: ty };
+        this.emit('mantle', { x: p.x, y: p.y, side });
+      }
       return true;
     }
     return false;
   }
+  // hanging: up, A or toward the wall climbs up, down or away lets go
+  _hangStep(dt, I) {
+    const p = this.p, h = p.hang;
+    h.t += dt; p.vx = 0; p.vy = 0; p.ground = false; p.state = 'hang';
+    if (!this.solidAt(h.cx, h.ty - 1)) { p.hang = null; p.regrab = 0.3; return; }
+    if (h.t < 0.2) { p.buffer = 0; return; }
+    const ax = Math.abs(I.x) > 0.3 ? Math.sign(I.x) : 0;
+    if (I.y > 0.5 || ax === h.side || p.buffer > 0) {
+      p.hang = null; p.buffer = 0;
+      p.mantle = p.mDur = P.CLIMB_UP; p.mFrom = { x: p.x, y: p.y }; p.mTo = { x: h.tx, y: h.ty }; p.climbUp = true; p.mSide = h.side;
+      this.emit('climbUp', { x: p.x, y: h.ty, side: h.side });
+    } else if (I.y < -0.5 || ax === -h.side) {
+      p.hang = null; p.regrab = 0.35; if (ax) p.vx = ax * 2;
+      this.emit('letGo', { x: p.x, y: p.y });
+    }
+  }
+
   _mantleStep(dt) {
     const p = this.p;
     p.mantle -= dt;
-    const k = 1 - Math.max(0, p.mantle) / 0.34;
+    const k = 1 - Math.max(0, p.mantle) / p.mDur;
     const up = Math.min(1, k / 0.6), over = Math.max(0, (k - 0.35) / 0.65);
     const ease = (q) => q * q * (3 - 2 * q);
     p.y = p.mFrom.y + (p.mTo.y - p.mFrom.y) * ease(up);
     p.x = p.mFrom.x + (p.mTo.x - p.mFrom.x) * ease(Math.min(1, over));
-    p.vx = 0; p.vy = 0; p.state = 'mantle';
-    if (p.mantle <= 0) { p.x = p.mTo.x; p.y = p.mTo.y; p.ground = true; p.state = 'idle'; p.regrab = 0.2; p.landT = 0.2; this.emit('land', { x: p.x, y: p.y, v: 3 }); }
+    p.vx = 0; p.vy = 0; p.state = p.climbUp ? 'climbup' : 'mantle';
+    if (p.mantle <= 0) { p.x = p.mTo.x; p.y = p.mTo.y; p.ground = true; p.state = 'idle'; p.regrab = 0.2; p.landT = 0.2; p.climbUp = false; this.emit('land', { x: p.x, y: p.y, v: 3 }); }
   }
 
   _onOneway() { const p = this.p; const t = this.tile(p.x, p.y - 0.1); return t === T.ONEWAY || (p.ride && true); }
@@ -844,9 +873,10 @@ export class Sim {
       // the scarab amulet takes the blow
       this.pw.shield = false;
       this.emit('shieldBreak', { x: p.x, y: p.y + 0.7 });
-      p.inv = 1.5; p.hurtT = 0.3; p.vx = (dir || -p.face) * 5.5; p.vy = 8; p.lockX = 0.2; p.climb = false;
+      p.inv = 1.5; p.hurtT = 0.3; p.vx = (dir || -p.face) * 5.5; p.vy = 8; p.lockX = 0.2; p.climb = false; p.hang = null; p.mantle = 0;
       return;
     }
+    p.hang = null; p.mantle = 0;
     this.hearts--;
     this.emit('hurt', { x: p.x, y: p.y + 0.7 });
     if (this.hearts <= 0 || crush) { this._die('hurt'); return; }

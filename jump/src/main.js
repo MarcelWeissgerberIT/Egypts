@@ -19,11 +19,17 @@ function writeSave(s) { try { localStorage.setItem(SAVE, JSON.stringify(s)); } c
 
 // one painted background per world, loaded when needed; only the current and the next stay in memory
 const bgLoader = new THREE.TextureLoader();
-async function worldBackground(assets, w) {
-  if (!assets.bg[w]) assets.bg[w] = await bgLoader.loadAsync(`assets/bg/w${w}.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; return t; }).catch(() => new THREE.Texture());
-  for (const k of Object.keys(assets.bg)) if (+k !== w && +k !== w + 1) { assets.bg[k].dispose(); delete assets.bg[k]; }
-  if (w < 10 && !assets.bg[w + 1]) bgLoader.loadAsync(`assets/bg/w${w + 1}.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; assets.bg[w + 1] = t; }).catch(() => {});
-  return assets.bg[w];
+// each world has two paintings (levels alternate between them); only this one and the next stay
+async function levelBackground(assets, key, nextKey) {
+  const load = (k) => bgLoader.loadAsync(`assets/bg/${k}.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; return t; });
+  if (!assets.bg[key]) assets.bg[key] = await load(key).catch(() => new THREE.Texture());
+  for (const k of Object.keys(assets.bg)) if (k !== key && k !== nextKey) { assets.bg[k].dispose(); delete assets.bg[k]; }
+  if (nextKey && !assets.bg[nextKey]) load(nextKey).then((t) => { assets.bg[nextKey] = t; }).catch(() => {});
+  return assets.bg[key];
+}
+// statues and things are loaded for the levels that show them
+async function propModels(assets, kinds) {
+  await Promise.all(kinds.map(async (k) => { if (!assets.models['prop_' + k]) assets.models['prop_' + k] = await loadModel('prop_' + k).catch(() => null); }));
 }
 
 const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
@@ -47,8 +53,8 @@ async function bossModel(assets, kind) {
 async function loadAssets(onProgress) {
   const tl = new THREE.TextureLoader();
   const assets = { tex: {}, models: {}, img: {}, bg: {} };
-  const tex = { sandstone: 'tex/sandstone.jpg', granite: 'tex/granite.jpg', hiero: 'tex/hiero.jpg', glyph: 'tex/glyph.jpg', water: 'tex/water.jpg', sand: 'tex/sand.jpg', dust: 'tex/dust.webp' };
-  const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'obelisk', 'worker_lp', 'anim_lp_walk', 'beetle', 'mummy', 'jackal'];
+  const tex = { sandstone: 'tex/sandstone.jpg', granite: 'tex/granite.jpg', limestone: 'tex/limestone.jpg', mudbrick: 'tex/mudbrick.jpg', basalt: 'tex/basalt.jpg', hiero: 'tex/hiero.jpg', glyph: 'tex/glyph.jpg', water: 'tex/water.jpg', sand: 'tex/sand.jpg', dust: 'tex/dust.webp' };
+  const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'anim_hang', 'anim_climbup', 'obelisk', 'worker_lp', 'anim_lp_walk', 'beetle', 'mummy', 'jackal'];
   const tex3d = ['icon_scarab', 'papyrus', 'icon_ankh', 'icon_eye', 'sparkle', 'pw_shield', 'pw_feather', 'pw_stick', 'pw_sun', 'sym_ankh', 'sym_lotus', 'sym_djed', 'sym_falcon'];
   const total = Object.keys(tex).length + models.length + tex3d.length;
   let done = 0; const tick = () => onProgress(++done / total);
@@ -127,10 +133,12 @@ class Game {
     const { world, index } = levelInfo(n);
     this.world = world;
     this.state = 'loading'; this.input.enabled = false; this.ui.fadeOut(true);
-    await worldBackground(this.assets, world);
+    const L = generateLevel(n);
+    await levelBackground(this.assets, L.style.bg, n < LEVELS ? generateLevel(n + 1).style.bg : null);
+    await propModels(this.assets, L.style.props);
     if (index === 10) await bossModel(this.assets, BOSSES[world - 1]);
     if (token !== this._startToken) return;
-    this.L = generateLevel(n);
+    this.L = L;
     this.sim = new Sim(this.L);
     this.stage.load(this.L, this.sim);
     this.sfx.setWorld(world); this.sfx.setAmbience(true);

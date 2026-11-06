@@ -21,7 +21,7 @@ await doc.transform(dedup(), prune(), resample(), textureCompress({ encoder: sha
 await io.write(path.join(OUT, 'explorer.glb'), doc);
 console.log('explorer', (fs.statSync(path.join(OUT, 'explorer.glb')).size / 1024).toFixed(0) + 'KB');
 
-for (const [src, name] of [['ex_run', 'Run'], ['ex_jump', 'Jump'], ['ex_fall', 'Fall'], ['ex_climb', 'Climb'], ['ex_swim', 'Swim'], ['ex_hit', 'Hit'], ['ex_cheer', 'Cheer']]) {
+for (const [src, name] of [['ex_run', 'Run'], ['ex_jump', 'Jump'], ['ex_fall', 'Fall'], ['ex_climb', 'Climb'], ['ex_swim', 'Swim'], ['ex_hit', 'Hit'], ['ex_cheer', 'Cheer'], ['ex_hang', 'Hang'], ['ex_climbup', 'ClimbUp']]) {
   const d = await io.read(path.join(SRC, src + '.glb'));
   const root = d.getRoot();
   for (const n of root.listNodes()) { if (n.getMesh()) n.setMesh(null); if (n.getSkin()) n.setSkin(null); }
@@ -77,5 +77,23 @@ for (const [src, name] of [['ex_run', 'Run'], ['ex_jump', 'Jump'], ['ex_fall', '
     await d.transform(...steps);
     await io.write(path.join(OUT, out + '.glb'), d);
     console.log(out, (fs.statSync(path.join(OUT, out + '.glb')).size / 1024).toFixed(0) + 'KB');
+  }
+}
+
+// statues and things standing around (static SAM 3D meshes)
+{
+  const { simplify, weld } = await import('@gltf-transform/functions');
+  const { MeshoptSimplifier } = await import('meshoptimizer');
+  await MeshoptSimplifier.ready;
+  const J = path.join(ROOT, 'art/src/jump');
+  for (const k of ['pharaoh', 'anubis', 'vase', 'sarcophagus', 'brazier', 'palm', 'treasure', 'cat', 'column']) {
+    const f = path.join(J, `sam_prop_${k}.glb`);
+    if (!fs.existsSync(f)) continue;
+    const d = await io.read(f);
+    for (const m of d.getRoot().listMaterials()) { m.setAlphaMode('OPAQUE'); m.setDoubleSided(false); m.setMetallicFactor(0.1); }
+    await d.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: 0.22, error: 0.004 }), dedup(), prune(),
+      textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512], quality: 80 }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+    await io.write(path.join(OUT, `prop_${k}.glb`), d);
+    console.log('prop_' + k, (fs.statSync(path.join(OUT, `prop_${k}.glb`)).size / 1024).toFixed(0) + 'KB');
   }
 }

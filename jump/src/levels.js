@@ -27,6 +27,22 @@ export const WORLDS = [
   { key: 'king', tex: 'granite', tint: 0xffb0c8, amb: 0.75, fog: 0x200818, sky: 0xd060ff, enemies: ['scarab', 'bat', 'mummy', 'cobra', 'flyer', 'hopper', 'jackal'], feats: ['tower', 'shaft', 'crusher', 'fire', 'darts', 'boulder', 'mover', 'vmover', 'crumble', 'sand', 'water'] },
 ];
 
+// what a level looks like: block stone, background painting, statues and things standing around,
+// banner colour. Each world has a few of each; the levels of a world cycle through them.
+const LOOKS = {
+  entrance: { tex: ['sandstone', 'limestone'], props: ['palm', 'vase', 'pharaoh', 'column', 'brazier', 'cat'], banner: '#7a2ab0' },
+  hieroglyphs: { tex: ['sandstone', 'limestone'], props: ['vase', 'cat', 'anubis', 'column', 'brazier', 'pharaoh'], banner: '#1f8a8a' },
+  cistern: { tex: ['limestone', 'sandstone', 'basalt'], props: ['palm', 'vase', 'column', 'cat'], banner: '#2a5ab0' },
+  scarabs: { tex: ['sandstone', 'mudbrick'], props: ['treasure', 'cat', 'vase', 'column', 'brazier'], banner: '#b0601a' },
+  crypt: { tex: ['granite', 'basalt'], props: ['sarcophagus', 'anubis', 'vase', 'brazier'], banner: '#4a2a70' },
+  sandfalls: { tex: ['sandstone', 'mudbrick'], props: ['column', 'pharaoh', 'palm', 'vase'], banner: '#b0401a' },
+  traps: { tex: ['granite', 'basalt', 'mudbrick'], props: ['brazier', 'column', 'anubis', 'vase'], banner: '#a01a2a' },
+  treasury: { tex: ['sandstone', 'limestone'], props: ['treasure', 'cat', 'pharaoh', 'vase', 'sarcophagus'], banner: '#c08a10' },
+  stars: { tex: ['granite', 'basalt', 'limestone'], props: ['cat', 'anubis', 'column', 'brazier'], banner: '#2a3ab0' },
+  king: { tex: ['granite', 'basalt', 'limestone'], props: ['pharaoh', 'sarcophagus', 'anubis', 'treasure', 'brazier'], banner: '#8a1ab0' },
+};
+export const PROPS = ['pharaoh', 'anubis', 'vase', 'sarcophagus', 'brazier', 'palm', 'treasure', 'cat', 'column'];
+
 // abilities: double jump from world 8 (golden sandals), wall jump from world 9 (falcon gloves)
 export function abilities(world) { return { double: world >= 8, wall: world >= 9, lantern: world >= 5 }; }
 
@@ -55,6 +71,17 @@ export function generateLevel(n) {
   const ents = [];
   const full = [];                       // columns filled solid from a height up to the ceiling
   const L = { n, world, index, theme: W, abilities: A, ents };
+  // decoration has its own random numbers, so it never changes the layout
+  const RD = rng(n * 104729 + 77);
+  const look = LOOKS[W.key];
+  const shuffled = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(RD() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  L.style = {
+    tex: look.tex[Math.floor((index - 1) / 2) % look.tex.length],
+    bg: `w${world}${index % 2 === 0 ? 'b' : ''}`,
+    props: shuffled(look.props).slice(0, 3),
+    banner: look.banner,
+    hue: (RD() - 0.5) * 0.12, light: 0.9 + RD() * 0.2, banners: RD() < 0.75,
+  };
   let x = 0, g = 4;                      // cursor and ground height (player stands at y = g)
   let calm = false;                      // no random enemies while building puzzle rooms
   let gid = 0;                           // puzzle / gate ids
@@ -82,6 +109,8 @@ export function generateLevel(n) {
     if (coins && R() < 0.6) coinRow(x + 1, x + w - 2, g + (R() < 0.5 ? 0 : 2));
     if (R() < (W.torchlit ? 0.6 : 0.35)) ent('torch', x + ri(1, w - 1) + 0.5, g + 2.2, { lit: !W.torchlit });
     if (!calm && w >= 3 && x > 15 && R() < foeRate) foe(x + ri(1, w - 2), g);
+    if (w >= 3 && RD() < 0.55) ent('prop', x + Math.floor(RD() * w) + 0.5, g, { kind: L.style.props[Math.floor(RD() * L.style.props.length)], yaw: (RD() - 0.5) * 0.6 });
+    if (L.style.banners && w >= 4 && RD() < 0.3) ent('banner', x + Math.floor(RD() * w) + 0.5, g + 3.4);
     if (!calm && w >= 4 && x > 12 && R() < 0.1) jar(x + ri(1, w - 2), g);
     x += w;
   };
