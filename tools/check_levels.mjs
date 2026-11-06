@@ -19,6 +19,7 @@ for (const d of [-1, -0.5, 0, 0.5, 1]) {
 patterns.push({ d: 0, climb: 1 }, { d: 0, climb: -1 }, { d: 1, swim: true }, { d: -1, swim: true }, { d: 0, swim: true }, { d: 0, drop: true });
 
 let bad = 0;
+const PZ = new Set(['lever', 'plate', 'pedestal', 'block']);
 for (let n = from; n <= to; n++) {
   const L = generateLevel(n);
   // movers become fixed ledges along their whole path for the check
@@ -30,13 +31,42 @@ for (let n = from; n <= to; n++) {
     }
   }
   const LL = { ...L, tiles, ents: [] };
+  // gates open once everything that works them (lever, block + plate, pedestals) is reachable
+  const gates = L.ents.filter((e) => e.type === 'gate');
+  const opened = new Set();
+  let points = [];
+  const near = (e, r = 1.4) => points.some((p) => Math.abs(p.x - e.x) < r && e.y - p.y > -0.6 && e.y - p.y < 3.6);
+  for (let round = 0; round <= gates.length; round++) {
+    points = explore(LL, L);
+    let more = false;
+    for (const gt of gates) {
+      if (opened.has(gt.gid)) continue;
+      const trig = L.ents.filter((e) => PZ.has(e.type) && e.gid === gt.gid);
+      if (trig.length && trig.every((e) => near(e.type === 'plate' || e.type === 'block' ? { x: e.x + 0.5, y: e.y } : e, 1.6))) {
+        opened.add(gt.gid); more = true;
+        for (let y = gt.y; y < gt.y + gt.h; y++) tiles[y * L.w + gt.x] = T.EMPTY;
+      }
+    }
+    if (!more) break;
+  }
+  const exitOk = near(L.exit, 1.2);
+  const pap = L.ents.filter((e) => e.type === 'papyrus');
+  // cracked vaults: reachable if the cracked floor above is reachable
+  const papOk = pap.map((e) => near(e, 1.6) || points.some((p) => Math.abs(p.x - e.x) < 1.6 && p.y > e.y && p.y - e.y < 2.6));
+  const ok = exitOk && papOk.every(Boolean) && opened.size === gates.length;
+  if (!ok) bad++;
+  if (!ok || process.argv.includes('-v')) console.log(`level ${n}: ${L.w}x${L.h}, exit ${exitOk ? 'ok' : 'UNREACHABLE'}, papyri ${papOk.map((b) => (b ? 'ok' : 'NO')).join(' ')}, gates ${opened.size}/${gates.length}, reached ${points.length} spots`);
+}
+console.log(`checked ${to - from + 1} levels, ${bad} with problems`);
+
+function explore(LL, L) {
   const seen = new Set();
   const key = (x, y) => Math.round(x * 2) + ',' + Math.round(y * 2);
   const queue = [{ x: L.spawn.x, y: L.spawn.y }];
   seen.add(key(L.spawn.x, L.spawn.y));
   const points = [];
   let steps = 0;
-  while (queue.length && steps < 6000) {
+  while (queue.length && steps < 20000) {
     const s0 = queue.shift(); steps++;
     points.push(s0);
     for (const pt of patterns) {
@@ -66,13 +96,5 @@ for (let n = from; n <= to; n++) {
       if (!seen.has(kk)) { seen.add(kk); queue.push(landed); }
     }
   }
-  const near = (e, r = 1.4) => points.some((p) => Math.abs(p.x - e.x) < r && e.y - p.y > -0.6 && e.y - p.y < 3.6);
-  const exitOk = near(L.exit, 1.2);
-  const pap = L.ents.filter((e) => e.type === 'papyrus');
-  // cracked vaults: reachable if the cracked floor above is reachable
-  const papOk = pap.map((e) => near(e, 1.6) || points.some((p) => Math.abs(p.x - e.x) < 1.6 && p.y > e.y && p.y - e.y < 2.6));
-  const ok = exitOk && papOk.every(Boolean);
-  if (!ok) bad++;
-  if (!ok || process.argv.includes('-v')) console.log(`level ${n}: exit ${exitOk ? 'ok' : 'UNREACHABLE'}, papyri ${papOk.map((b) => (b ? 'ok' : 'NO')).join(' ')}, reached ${points.length} spots`);
+  return points;
 }
-console.log(`checked ${to - from + 1} levels, ${bad} with problems`);

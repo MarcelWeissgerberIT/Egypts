@@ -30,9 +30,9 @@ async function loadAssets(onProgress) {
   const tl = new THREE.TextureLoader();
   const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
   const assets = { tex: {}, models: {}, img: {}, bg: {} };
-  const tex = { sandstone: 'tex/sandstone.jpg', granite: 'tex/granite.jpg', hiero: 'tex/hiero.jpg', water: 'tex/water.jpg', sand: 'tex/sand.jpg', dust: 'tex/dust.webp' };
-  const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'obelisk', 'worker_lp', 'anim_lp_walk'];
-  const tex3d = ['icon_scarab', 'papyrus', 'icon_ankh', 'sparkle'];
+  const tex = { sandstone: 'tex/sandstone.jpg', granite: 'tex/granite.jpg', hiero: 'tex/hiero.jpg', glyph: 'tex/glyph.jpg', water: 'tex/water.jpg', sand: 'tex/sand.jpg', dust: 'tex/dust.webp' };
+  const models = ['explorer', 'anim_run', 'anim_jump', 'anim_fall', 'anim_climb', 'anim_swim', 'anim_hit', 'anim_cheer', 'obelisk', 'worker_lp', 'anim_lp_walk', 'beetle', 'mummy'];
+  const tex3d = ['icon_scarab', 'papyrus', 'icon_ankh', 'icon_eye', 'sparkle', 'pw_shield', 'pw_feather', 'pw_stick', 'pw_sun', 'sym_ankh', 'sym_lotus', 'sym_djed', 'sym_falcon'];
   const total = Object.keys(tex).length + models.length + tex3d.length;
   let done = 0; const tick = () => onProgress(++done / total);
   const jobs = [];
@@ -158,7 +158,7 @@ class Game {
         case 'die': this.sfx.loseLife(); this.later(e.why === 'pit' ? 350 : 700, () => this.ui.fadeOut(true)); break;
         case 'respawn': this.ui.fadeOut(false); break;
         case 'splash': case 'swim': this.sfx.splash(); break;
-        case 'break': this.sfx.crack(); if (this.hintsDone) this.hintsDone['action' + this.n] = true; break;
+        case 'break': this.sfx.crack(); this._did('action'); break;
         case 'crumble': this.sfx.rumble(); break;
         case 'dart': if (Math.abs(e.x - S.p.x) < 14) this.sfx.dart(); break;
         case 'slam': if (Math.abs(e.x - S.p.x) < 12) this.sfx.slam(); break;
@@ -166,11 +166,31 @@ class Game {
         case 'boulder': this.sfx.boulder(); break;
         case 'checkpoint': this.sfx.ankh(); break;
         case 'win': this.sfx.door(); this.later(600, () => this.sfx.fanfare()); this._won(); break;
+        case 'blockCoin': this.sfx.coin(); this.ui.bumpCoins(); break;
+        case 'blockPower': this.sfx.reveal(); break;
+        case 'jar': this.sfx.jar(); if (e.coins) this.ui.bumpCoins(); this._did('action'); break;
+        case 'powerGet': this.sfx.powerup(); this.ui.flash(); this.ui.powerPop(e.kind); break;
+        case 'powerEnd': this.sfx.powerEnd(); break;
+        case 'shieldBreak': this.sfx.shieldBreak(); break;
+        case 'throw': this.sfx.throwStick(); break;
+        case 'lever': this.sfx.lever(); this._did('action'); break;
+        case 'gate': this.sfx.gate(); break;
+        case 'plate': this.sfx.plate(); break;
+        case 'plateClick': this.sfx.click(); break;
+        case 'push': case 'pull': this.sfx.push(); break;
+        case 'blockLand': this.sfx.land(); break;
+        case 'blockReset': this.sfx.invalid(); break;
+        case 'symRight': this.sfx.symbol(e.step); this._did('action'); break;
+        case 'symWrong': this.sfx.wrong(); break;
+        case 'solved': this.later(250, () => this.sfx.solved()); break;
+        case 'groan': if (Math.abs(e.x - S.p.x) < 9) this.sfx.groan(Math.abs(e.x - S.p.x)); break;
+        case 'hop': if (Math.abs(e.x - S.p.x) < 10) this.sfx.hop(); break;
         default: break;
       }
     }
   }
 
+  _did(k) { const H = this.hintsDone || (this.hintsDone = {}); H[k + this.n] = true; }
   // the first levels teach the controls with a hand: move, jump, break cracked stones, climb ladders
   _hints(near) {
     const S = this.sim, p = S.p, H = this.hintsDone || (this.hintsDone = {});
@@ -183,7 +203,8 @@ class Game {
     }
     if (!kind && near && !H['action' + this.n]) kind = 'action';
     if (!kind && S.tile(p.x, p.y + 0.5) === 4 && !p.climb && !H.climb) kind = 'climb';
-    if (p.climb) H.climb = true;
+    if (!kind && p.ground && S.tile(p.x, p.y - 0.2) === 4 && !H.down) kind = 'down';
+    if (p.climb) { H.climb = true; if (p.vy < 0) H.down = true; }
     if (this._hint !== kind) { this._hint = kind; this.ui.hint(kind); }
   }
 
@@ -236,11 +257,15 @@ class Game {
       this._events(this.sim.drain());
       const S = this.sim;
       this.ui.setCoins(S.coins); this.ui.setPapyri(S.found); this.ui.setHearts(Math.max(0, S.hearts), S.maxHearts);
-      // the action button glows next to a cracked stone
-      const p = S.p; let near = false;
-      for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1; dy++) if (S.tile(p.x + dx, p.y + 0.5 + dy) === 8) { near = true; break; }
+      // the action button glows where it does something: cracked stone, lever, pedestal, jar, block
+      const p = S.p;
+      const near = !!S.actionTarget();
       this.ui.glowAction(near);
+      this.ui.setPowers(S.pw);
       this._hints(near);
+      // holding up/down while standing still looks around (and toward the next floor)
+      const st = this.input.state;
+      this.stage.lookY = p.ground && !p.climb && Math.abs(p.vx) < 0.3 && Math.abs(st.x) < 0.5 ? st.y : 0;
       // footsteps follow the running animation; torches crackle when the explorer is near
       if (p.state === 'run' && p.ground) {
         this.stepT -= dt * (0.75 + 0.35 * Math.min(1, Math.abs(p.vx) / 7.2));

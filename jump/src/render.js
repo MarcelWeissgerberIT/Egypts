@@ -3,10 +3,11 @@
 // the Meshy explorer with her animations, enemies, traps and particles.
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { T, H } from './levels.js';
+import { T } from './levels.js';
 import { P } from './sim.js';
 
 const D = 0.9;                // half depth of the blocks (z)
+const BEETLE_YAW = -Math.PI / 2;  // turns the beetle model's head toward +x
 const FOV = 38;
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpV = new THREE.Vector3(), tmpS = new THREE.Vector3();
 const canvasTex = (w, h, draw) => { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; };
@@ -68,9 +69,10 @@ export class Stage {
     this.shake = 0;
     this.level = new THREE.Group(); this.scene.add(this.level);
     this.texs = {};
-    for (const k of ['sandstone', 'granite', 'hiero']) {
-      const t = assets.tex[k]; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; this.texs[k] = t;
+    for (const k of ['sandstone', 'granite', 'hiero', 'glyph']) {
+      const t = assets.tex[k]; if (!t) continue; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; this.texs[k] = t;
     }
+    this.focus = null; this.lookY = 0; this.look = 0;
     this._lights();
     this._particles();
     this._player();
@@ -115,6 +117,25 @@ export class Stage {
       c.strokeStyle = 'rgba(90,70,50,0.4)'; for (let k = 0; k < 6; k++) { c.beginPath(); c.moveTo(0, k * 11); c.lineTo(w, k * 11 + 9); c.stroke(); }
     });
     this.linenTex.wrapS = this.linenTex.wrapT = THREE.RepeatWrapping;
+    this.ringTex = canvasTex(128, 128, (c, w) => {
+      const g = c.createRadialGradient(w / 2, w / 2, w * 0.3, w / 2, w / 2, w / 2);
+      g.addColorStop(0, 'rgba(255,240,180,0)'); g.addColorStop(0.55, 'rgba(255,220,120,0.15)'); g.addColorStop(0.8, 'rgba(255,230,150,0.9)'); g.addColorStop(0.9, 'rgba(255,200,90,0.4)'); g.addColorStop(1, 'rgba(255,180,60,0)');
+      c.fillStyle = g; c.fillRect(0, 0, w, w);
+    });
+    this.wingTex = canvasTex(64, 64, (c, w) => {
+      const g = c.createLinearGradient(0, 0, w, w); g.addColorStop(0, 'rgba(120,255,230,0.85)'); g.addColorStop(0.6, 'rgba(190,120,255,0.7)'); g.addColorStop(1, 'rgba(255,220,120,0.4)');
+      c.fillStyle = g; c.beginPath(); c.ellipse(w / 2, w / 2, w * 0.48, w * 0.24, 0.35, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(40,20,60,0.6)'; c.lineWidth = 2; c.beginPath(); c.moveTo(6, w / 2 + 6); c.lineTo(w - 8, w / 2 - 8); c.stroke();
+    });
+    this.jarTex = canvasTex(64, 128, (c, w, h) => {
+      c.fillStyle = '#b8643a'; c.fillRect(0, 0, w, h);
+      for (let y = 0; y < h; y += 2) { c.fillStyle = `rgba(80,30,10,${0.05 + Math.random() * 0.06})`; c.fillRect(0, y, w, 1); }
+      c.fillStyle = '#5a2a80'; c.fillRect(0, h * 0.42, w, h * 0.09);
+      c.fillStyle = '#e8b040'; c.fillRect(0, h * 0.4, w, h * 0.02); c.fillRect(0, h * 0.51, w, h * 0.02);
+      c.fillStyle = '#2a8a8a'; for (let x = 4; x < w; x += 16) c.fillRect(x, h * 0.6, 6, h * 0.05);
+    });
+    this.gemCols = [0x3ff0d8, 0xc070ff, 0xffc030, 0xff6aa0];
+    this.symCols = { ankh: 0x40f0d0, lotus: 0xff70c0, djed: 0xffb030, falcon: 0x5a8cff };
     this.gold = new THREE.MeshStandardMaterial({ color: 0xffc94a, metalness: 0.85, roughness: 0.3, emissive: 0x3a2000, emissiveIntensity: 0.4 });
     this.bronze = new THREE.MeshStandardMaterial({ color: 0xc8864a, metalness: 0.8, roughness: 0.35 });
     this.wood = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.85 });
@@ -187,11 +208,12 @@ export class Stage {
   _dispose(root) {
     const shared = new Set(Object.values(this.texs).concat(Object.values(this.A.tex), Object.values(this.A.bg || {}), Object.values(this.A.img)));
     root.traverse((o) => {
+      if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose();      // each clone has its own bone texture
       if (o.geometry && !o.userData.sharedGeo) o.geometry.dispose();
       const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
       for (const m of mats) {
         if (m.userData && m.userData.shared) continue;
-        for (const k of ['map', 'alphaMap']) if (m[k] && !shared.has(m[k]) && m[k] !== this.flameTex && m[k] !== this.rayTex && m[k] !== this.crackTex && m[k] !== this.linenTex && m[k] !== this.ptex.glow) m[k].dispose();
+        for (const k of ['map', 'alphaMap']) if (m[k] && !shared.has(m[k]) && ![this.flameTex, this.rayTex, this.crackTex, this.linenTex, this.ptex.glow, this.ringTex, this.wingTex, this.jarTex].includes(m[k])) m[k].dispose();
         if (![this.gold, this.bronze, this.wood, this.darkWood].includes(m)) m.dispose();
       }
     });
@@ -203,6 +225,7 @@ export class Stage {
     this.level.clear();
     this.entViews = new Map();
     this.crumbleViews = new Map();
+    this.focus = null; this.stickView = null;
     this.crackViews = new Map();
     const W = L.theme;
     const tex = this.texs[W.tex].clone(); tex.needsUpdate = true; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -223,6 +246,7 @@ export class Stage {
     this._blocks(L);
     this._backdrop(L);
     this._entities(L);
+    this._powerFx();
     this.cam.x = L.spawn.x + 4; this.cam.y = L.spawn.y + 3;
   }
 
@@ -322,17 +346,32 @@ export class Stage {
       g.position.set(x, y0, z); g.traverse((m) => { if (m.isMesh) m.receiveShadow = true; });
       this.level.add(g);
     };
-    for (let x = 6; x < L.w + 10; x += 11) pillar(x, -4.5, 0.75, 20);
-    for (let x = 0; x < L.w + 20; x += 17) pillar(x + 7, -11, 1.4, 30, -4);
-    // low wall right behind the path
-    const wallTex = this.texs.hiero.clone(); wallTex.needsUpdate = true; wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(L.w / 4, 1);
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(L.w, 4), new THREE.MeshStandardMaterial({ map: wallTex, color: new THREE.Color(W.tint).multiplyScalar(0.55), roughness: 1 }));
-    wall.position.set(L.w / 2, 1.2, -1.6); wall.receiveShadow = true; this.level.add(wall);
+    for (let x = 6; x < L.w + 10; x += 11) pillar(x, -4.5, 0.75, L.h + 2);
+    for (let x = 0; x < L.w + 20; x += 17) pillar(x + 7, -11, 1.4, L.h + 12, -4);
+    // low wall right behind the path, stepping with the ground
+    const floorAt = (x) => { let k = 0; while (k < L.h && L.tiles[k * L.w + x] === T.SOLID) k++; return k; };
+    const wallMat = new THREE.MeshStandardMaterial({ map: this.texs.hiero, color: new THREE.Color(W.tint).multiplyScalar(0.55), roughness: 1 });
+    for (let x0 = 0; x0 < L.w; x0 += 6) {
+      let fy = 99; for (let x = x0; x < Math.min(L.w, x0 + 6); x++) fy = Math.min(fy, floorAt(x));
+      const w = Math.min(6, L.w - x0), y0 = fy - 2.5, h = 6.5;
+      const geo = new THREE.PlaneGeometry(w, h); const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (x0 + uv.getX(i) * w) / 4, (y0 + uv.getY(i) * h) / 4);
+      const wall = new THREE.Mesh(geo, wallMat); wall.position.set(x0 + w / 2, y0 + h / 2, -1.6); wall.receiveShadow = true; this.level.add(wall);
+    }
     // god rays
     this.rays = [];
     for (let x = 4; x < L.w; x += 9 + (x % 7)) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 18), new THREE.MeshBasicMaterial({ map: this.rayTex, color: W.sky, transparent: true, opacity: W.dark ? 0.08 : 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      m.position.set(x, 9, -3 - (x % 3)); m.rotation.z = -0.32; m.renderOrder = -1; this.level.add(m); this.rays.push(m);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(2.2, L.h + 8), new THREE.MeshBasicMaterial({ map: this.rayTex, color: W.sky, transparent: true, opacity: W.dark ? 0.08 : 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      m.position.set(x, L.h / 2 + 1, -3 - (x % 3)); m.rotation.z = -0.32; m.renderOrder = -1; this.level.add(m); this.rays.push(m);
+    }
+    // the tall chambers get a carved inner wall
+    const chamberMat = new THREE.MeshStandardMaterial({ map: this.texs.hiero, color: new THREE.Color(W.tint).multiplyScalar(0.42), roughness: 1 });
+    for (const e of L.ents) {
+      if (e.type !== 'chamber') continue;
+      const geo = new THREE.PlaneGeometry(e.w + 1, e.h); const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (e.w + 1) / 3, uv.getY(i) * e.h / 3);
+      const m = new THREE.Mesh(geo, chamberMat); m.position.set(e.x + e.w / 2 - 0.5, e.y + e.h / 2, -1.3); m.receiveShadow = true; this.level.add(m);
+      for (const yy of [e.y + e.h - 0.2]) { const t = new THREE.Mesh(new THREE.BoxGeometry(e.w + 1, 0.12, 0.1), this.gold); t.position.set(e.x + e.w / 2 - 0.5, yy, -1.25); this.level.add(t); }
     }
   }
 
@@ -340,6 +379,13 @@ export class Stage {
     const S = this.sim;
     const icon = (key) => { const t = this.A.img[key + 'Tex']; return t; };
     this.torches = [];
+    // per-level materials of the puzzle pieces
+    const stoneMat = new THREE.MeshStandardMaterial({ map: this.texs.hiero, color: new THREE.Color(L.theme.tint).multiplyScalar(0.95), roughness: 0.85 });
+    this.glyphMats = { front: new THREE.MeshStandardMaterial({ map: this.texs.glyph || this.texs.sandstone, roughness: 0.55, metalness: 0.15, emissive: 0x2a1240, emissiveIntensity: 0.5 }),
+      side: new THREE.MeshStandardMaterial({ map: this.texs.sandstone, color: 0xe8b860, roughness: 0.6, metalness: 0.3 }),
+      used: new THREE.MeshStandardMaterial({ map: this.texs.sandstone, color: 0x8a7458, roughness: 0.95 }) };
+    const gemMat = (i, k = 1) => new THREE.MeshStandardMaterial({ color: this.gemCols[i % 4], emissive: this.gemCols[i % 4], emissiveIntensity: 0.6 * k, metalness: 0.3, roughness: 0.2 });
+    const unit = new THREE.BoxGeometry(1, 1, 1);
     for (const e of S.ents) {
       let v = null;
       switch (e.type) {
@@ -397,6 +443,69 @@ export class Stage {
           v = new THREE.Mesh(new THREE.PlaneGeometry(e.w || 1.4, 12), new THREE.MeshBasicMaterial({ map: tex, color: 0xffd090, transparent: true, opacity: 0.75, depthWrite: false }));
           v.userData.tex = tex; v.position.set(e.x, e.y + 6, 0.5); break;
         }
+        case 'flyer': v = this._flyer(); v.position.set(e.x, e.y, 0.3); break;
+        case 'hopper': v = this._scarab(true); v.position.set(e.x, e.y, 0); break;
+        case 'itemblock': {
+          const g = this.glyphMats;
+          v = new THREE.Mesh(unit, [g.side, g.side, g.side, g.side, g.front, g.side]);
+          v.scale.set(1, 1, 1.5); v.castShadow = v.receiveShadow = true; v.position.set(e.x + 0.5, e.y + 0.5, 0); v.userData.used = false; break;
+        }
+        case 'block': {
+          v = new THREE.Group();
+          const b = new THREE.Mesh(unit, stoneMat); b.scale.set(0.98, 0.98, 1.5); b.castShadow = b.receiveShadow = true; v.add(b);
+          for (const [sx, sy, w, h] of [[0, 0.47, 0.98, 0.06], [0, -0.47, 0.98, 0.06], [0.47, 0, 0.06, 0.98], [-0.47, 0, 0.06, 0.98]]) { const t = new THREE.Mesh(unit, this.gold); t.scale.set(w, h, 0.04); t.position.set(sx, sy, 0.76); v.add(t); }
+          const eye = new THREE.Sprite(new THREE.SpriteMaterial({ map: icon('icon_eye') || null, transparent: true, depthWrite: false, opacity: 0.85 })); eye.scale.set(0.5, 0.5, 1); eye.position.set(0, 0, 0.8); v.add(eye);
+          v.position.set(e.x + 0.5, e.y + 0.5, 0); break;
+        }
+        case 'gate': {
+          v = new THREE.Group();
+          const slab = new THREE.Mesh(unit, new THREE.MeshStandardMaterial({ map: this.texs.hiero, color: new THREE.Color(L.theme.tint).multiplyScalar(0.7), roughness: 0.8 }));
+          slab.scale.set(0.9, e.h, 1.3); slab.position.y = e.h / 2; slab.castShadow = true; v.add(slab);
+          for (const bx of [-0.3, 0, 0.3]) { const bar = new THREE.Mesh(unit, this.bronze); bar.scale.set(0.07, e.h - 0.2, 0.06); bar.position.set(bx, e.h / 2, 0.67); v.add(bar); }
+          const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.17), gemMat(e.gem, 1.5)); gem.position.set(0, e.h - 0.45, 0.72); v.add(gem);
+          v.userData.gem = gem; v.userData.lift = 0;
+          v.position.set(e.x + 0.5, e.y, 0); break;
+        }
+        case 'lever': {
+          v = new THREE.Group();
+          const base = new THREE.Mesh(unit, stoneMat); base.scale.set(0.6, 0.3, 0.5); base.position.y = 0.15; v.add(base);
+          const piv = new THREE.Group(); piv.position.y = 0.3; v.add(piv);
+          const h = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.95, 8), this.bronze); h.position.y = 0.47; piv.add(h);
+          const knob = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), gemMat(e.gem, 1.3)); knob.position.y = 0.97; piv.add(knob);
+          piv.rotation.z = 0.65; v.userData.piv = piv;
+          const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: this.gemCols[e.gem % 4], transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })); halo.position.y = 1.0; halo.scale.set(1.3, 1.3, 1); v.add(halo); v.userData.halo = halo;
+          v.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+          v.position.set(e.x, e.y, 0.2); break;
+        }
+        case 'plate': {
+          v = new THREE.Group();
+          const pl = new THREE.Mesh(unit, this.bronze); pl.scale.set(0.9, 0.12, 1.3); pl.position.y = 0.06; pl.receiveShadow = true; v.add(pl);
+          const inl = new THREE.Mesh(unit, gemMat(e.gem, 0.6)); inl.scale.set(0.55, 0.03, 0.8); inl.position.y = 0.125; v.add(inl);
+          v.userData.inlay = inl; v.position.set(e.x + 0.5, e.y, 0); break;
+        }
+        case 'pedestal': {
+          v = new THREE.Group();
+          const col = new THREE.Mesh(unit, stoneMat); col.scale.set(0.55, 1.0, 0.55); col.position.y = 0.5; col.castShadow = true; v.add(col);
+          const cap = new THREE.Mesh(unit, this.gold); cap.scale.set(0.72, 0.1, 0.72); cap.position.y = 1.05; v.add(cap);
+          const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: this.symCols[e.sym], transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); glow.position.set(0, 1.55, 0.25); glow.scale.set(2, 2, 1); v.add(glow);
+          const plq = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: icon('sym_' + e.sym) || null, transparent: true, color: 0xb8a890, depthWrite: false }));
+          plq.position.set(0, 1.55, 0.3); v.add(plq);
+          v.userData.glow = glow; v.userData.plq = plq; v.position.set(e.x, e.y, 0); break;
+        }
+        case 'tablet': v = this._tablet(e); break;
+        case 'jar': {
+          v = new THREE.Group();
+          const prof = [[0.001, 0], [0.16, 0.02], [0.27, 0.14], [0.31, 0.32], [0.27, 0.5], [0.15, 0.64], [0.11, 0.72], [0.15, 0.8], [0.13, 0.84], [0.001, 0.84]].map(([a, b]) => new THREE.Vector2(a, b));
+          const m = new THREE.Mesh(new THREE.LatheGeometry(prof, 14), new THREE.MeshStandardMaterial({ map: this.jarTex, roughness: 0.8 }));
+          m.castShadow = true; v.add(m); v.position.set(e.x, e.y, 0.1); break;
+        }
+        case 'power': {
+          v = new THREE.Group();
+          const glowCol = { shield: 0x60ffe0, stick: 0xffc060, feather: 0xe0d0ff, sun: 0xffd040 }[e.kind] || 0xffffff;
+          const g2 = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: glowCol, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })); g2.scale.set(2, 2, 1); v.add(g2);
+          const ic = new THREE.Sprite(new THREE.SpriteMaterial({ map: icon('pw_' + e.kind) || null, transparent: true, depthWrite: false })); ic.scale.set(0.95, 0.95, 1); v.add(ic);
+          v.userData.glow = g2; v.visible = false; v.position.set(e.x, e.y, 0.35); break;
+        }
         default: break;
       }
       if (v) { this.level.add(v); this.entViews.set(e.id, v); }
@@ -429,15 +538,46 @@ export class Stage {
     return g;
   }
 
-  _scarab() {
+  // the beetle model (Meta SAM 3D); falls back to a few spheres when it could not be loaded
+  _beetleMesh(tint = null) {
+    const src = this.A.models.beetle;
     const g = new THREE.Group();
-    const shell = new THREE.MeshStandardMaterial({ color: 0x2a9a6a, metalness: 0.75, roughness: 0.25, emissive: 0x0a3020, emissiveIntensity: 0.4 });
+    if (src) {
+      const o = src.scene.clone(true);
+      o.traverse((m) => {
+        if (!m.isMesh) return;
+        m.castShadow = true; m.userData.sharedGeo = true;
+        if (!m.material.userData.tuned) { m.material.metalness = 0.25; m.material.roughness = 0.35; m.material.userData.tuned = true; }
+        if (tint) { m.material = m.material.clone(); m.material.color = new THREE.Color(tint); m.material.emissive = new THREE.Color(tint).multiplyScalar(0.08); }
+        else { m.material.userData.shared = true; m.material.emissive = new THREE.Color(0x0a2018); }
+      });
+      const box = new THREE.Box3().setFromObject(o), size = box.getSize(new THREE.Vector3());
+      const sc = 1.0 / Math.max(size.x, size.z);
+      o.scale.setScalar(sc); o.position.set(-(box.min.x + size.x / 2) * sc, -box.min.y * sc, -(box.min.z + size.z / 2) * sc);
+      const piv = new THREE.Group(); piv.add(o); piv.rotation.y = BEETLE_YAW; g.add(piv);
+      g.userData.body = piv;
+      return g;
+    }
+    const shell = new THREE.MeshStandardMaterial({ color: tint || 0x2a9a6a, metalness: 0.75, roughness: 0.25, emissive: 0x0a3020, emissiveIntensity: 0.4 });
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.36, 16, 10), shell); body.scale.set(1.25, 0.6, 0.9); body.position.y = 0.26; g.add(body);
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), new THREE.MeshStandardMaterial({ color: 0x1a3a2a, metalness: 0.5, roughness: 0.4 })); head.position.set(0.42, 0.22, 0); g.add(head);
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.02, 0.03), this.gold); line.position.set(-0.02, 0.48, 0); g.add(line);
-    const legs = [];
-    for (const sx of [-0.25, 0, 0.25]) for (const sz of [-1, 1]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.35, 4), this.darkWood); l.position.set(sx, 0.12, sz * 0.3); l.rotation.x = sz * 0.9; g.add(l); legs.push(l); }
-    g.userData.legs = legs; g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    g.userData.body = body;
+    return g;
+  }
+  _scarab(hopper = false) {
+    const g = new THREE.Group();
+    const b = this._beetleMesh(hopper ? 0xffb8f0 : null);
+    if (hopper) b.scale.setScalar(0.85);
+    g.add(b); g.userData.beetle = b;
+    return g;
+  }
+  _flyer() {
+    const g = new THREE.Group();
+    const b = this._beetleMesh(0xc8ffe8); b.scale.setScalar(0.8); b.position.y = -0.25; g.add(b);
+    const wm = new THREE.MeshBasicMaterial({ map: this.wingTex, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+    const wings = [];
+    for (const s2 of [-1, 1]) { const piv = new THREE.Group(); piv.position.set(-0.05, 0.12, 0); const w = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.45), wm); w.position.set(-0.1, 0, s2 * 0.38); w.rotation.x = -Math.PI / 2; piv.add(w); g.add(piv); wings.push({ piv, s: s2 }); }
+    g.userData.wings = wings; g.userData.beetle = b;
     return g;
   }
 
@@ -456,20 +596,62 @@ export class Stage {
 
   _mummy() {
     const A = this.A.models;
+    if (A.mummy) {
+      const root = SkeletonUtils.clone(A.mummy.scene);
+      root.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.frustumCulled = false; m.userData.sharedGeo = true; m.material.userData.shared = true; m.material.metalness = 0; m.material.roughness = 0.85; } });
+      root.scale.multiplyScalar(1.5 / 1.6);
+      const g = new THREE.Group(); g.add(root);
+      const act = new Actor(root, { Walk: inplace(A.mummy.animations[0]) });
+      act.play('Walk', { speed: 0.8 });
+      act.mixer.update(Math.random() * 2);
+      g.userData.actor = act;
+      const eyes = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: 0x80ff60, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+      eyes.scale.set(0.5, 0.3, 1); eyes.position.set(0, 1.38, 0.25); g.add(eyes);
+      return g;
+    }
     if (!A.worker_lp) return new THREE.Group();
     const root = SkeletonUtils.clone(A.worker_lp.scene);
     const mat = new THREE.MeshStandardMaterial({ map: this.linenTex, color: 0xe8dcc0, roughness: 0.95 });
-    root.traverse((m) => { if (m.isMesh) { m.material = mat; m.castShadow = true; m.frustumCulled = false; } });
+    root.traverse((m) => { if (m.isMesh) { m.material = mat; m.castShadow = true; m.frustumCulled = false; m.userData.sharedGeo = true; } });
     root.scale.multiplyScalar(1.55 / 1.75);
     const g = new THREE.Group(); g.add(root);
     const act = new Actor(root, { Walk: inplace(A.anim_lp_walk?.animations?.[0]) });
     act.play('Walk', { speed: 0.55 });
     g.userData.actor = act;
     g.userData.arms = ['LeftArm', 'RightArm'].map((n) => root.getObjectByName(n));
-    const eyeM = new THREE.MeshBasicMaterial({ color: 0x9cff60 });
-    const head = root.getObjectByName('Head');
-    if (head) for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(4, 6, 4), eyeM); e.position.set(sx * 5, 8, 12); head.add(e); }
     return g;
+  }
+
+  // the stone tablet that shows the order of the symbols
+  _tablet(e) {
+    const n = e.seq.length, cw = 220 * n + 60, ch = 300;
+    const tex = canvasTex(cw, ch, (c, w, h) => {
+      const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#d8b880'); g.addColorStop(1, '#a8804c'); c.fillStyle = g; c.fillRect(0, 0, w, h);
+      c.strokeStyle = '#ffd25a'; c.lineWidth = 14; c.strokeRect(7, 7, w - 14, h - 14);
+      c.strokeStyle = 'rgba(80,40,20,0.5)'; c.lineWidth = 3; c.strokeRect(22, 22, w - 44, h - 44);
+      e.seq.forEach((sym, i) => {
+        const im = this.A.img['sym_' + sym + 'Tex']?.image, x = 40 + i * 220;
+        if (im) c.drawImage(im, x, 50, 200, 200);
+        if (i < n - 1) { c.fillStyle = '#7a3ab0'; c.beginPath(); c.moveTo(x + 204, 128); c.lineTo(x + 222, 150); c.lineTo(x + 204, 172); c.closePath(); c.fill(); }
+      });
+    });
+    const w = 0.85 * n + 0.3;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * ch / cw), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, emissive: 0x201008, emissiveIntensity: 0.3 }));
+    m.position.set(e.x + w / 2 - 0.4, e.y + 0.4, -1.2);
+    const g = new THREE.Group(); g.add(m);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: 0xffe0a0, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false })); glow.position.set(e.x + w / 2 - 0.4, e.y + 0.4, -1.1); glow.scale.set(w * 1.6, 2.2, 1); g.add(glow);
+    return g;
+  }
+
+  // effects of the explorer's power-ups: amulet ring, sun glow, feather
+  _powerFx() {
+    const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ringTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8 }));
+    ring.scale.set(2.1, 2.1, 1); ring.visible = false; this.level.add(ring);
+    const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ptex.glow, color: 0xffc840, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7 }));
+    sun.scale.set(3.4, 3.4, 1); sun.visible = false; this.level.add(sun);
+    const feather = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.A.img.pw_featherTex || null, transparent: true, depthWrite: false }));
+    feather.scale.set(0.7, 0.7, 1); feather.visible = false; this.level.add(feather);
+    this.fx = { ring, sun, feather };
   }
 
   _cobra() {
@@ -508,6 +690,34 @@ export class Stage {
       case 'slam': this.shake = 0.12; this.dust(e.x, e.y, 6); break;
       case 'boulderCrash': this.shake = 0.4; this.dust(e.x, e.y + 0.5, 14); break;
       case 'win': { const v = [...this.entViews.values()].find((q) => q.userData.doors); if (v) v.userData.opening = 0.001; this.burst(e.x, e.y + 1.6, 30, 0xd090ff, 5); break; }
+      case 'blockCoin': {
+        const v = this.entViews.get(e.id); if (v && this.sim.ents[e.id].used) v.material = [1, 2, 3, 4, 5, 6].map(() => this.glyphMats.used);
+        this.spawn('coin', e.x, e.y + 0.5, 0.5, { vy: 7, gravity: 16, life: 0.55, size: 0.75, map: this.A.img.icon_scarabTex, additive: false });
+        this.burst(e.x, e.y + 0.3, 6, 0xffd860, 2); break;
+      }
+      case 'blockPower': { const v = this.entViews.get(e.id); if (v) v.material = [1, 2, 3, 4, 5, 6].map(() => this.glyphMats.used); this.burst(e.x, e.y + 0.4, 16, 0xffe0a0, 3); break; }
+      case 'jar': {
+        const v = this.entViews.get(e.id); if (v) v.visible = false;
+        for (let k = 0; k < 10; k++) this.spawn('dust', e.x + (Math.random() - 0.5) * 0.5, e.y + 0.4 + Math.random() * 0.4, 0.5, { vx: (Math.random() - 0.5) * 5, vy: 2 + Math.random() * 3, life: 0.7, size: 0.22, gravity: 12, color: 0xc06a3a, additive: false });
+        if (e.coins) for (let k = 0; k < 3; k++) this.spawn('coin', e.x, e.y + 0.6, 0.5, { vx: (k - 1) * 1.6, vy: 6 + k, gravity: 16, life: 0.6, size: 0.6, map: this.A.img.icon_scarabTex, additive: false });
+        this.dust(e.x, e.y, 5, 0xd8a070); break;
+      }
+      case 'powerGet': { const v = this.entViews.get(e.id); if (v) v.visible = false; this.burst(e.x, e.y, 26, 0xfff0a0, 5); this.spawn('glow', e.x, e.y, 0.5, { life: 0.6, size: 1.5, grow: 3, color: 0xffe080 }); break; }
+      case 'shieldBreak': this.shake = 0.2; this.burst(e.x, e.y, 18, 0x60ffe0, 4.5); break;
+      case 'gate': {
+        const v = this.entViews.get(e.id); if (v) v.userData.opening = true;
+        this.shake = 0.18; this.dust(e.x, e.y, 10, 0xd8b890);
+        this.focus = { x: e.x, y: e.y + 1.4, t: 1.7 }; break;
+      }
+      case 'lever': { const v = this.entViews.get(e.id); if (v) v.userData.on = true; this.burst(e.x, e.y + 1, 10, this.gemCols[(this.sim.ents[e.id].gem || 0) % 4], 2.5); break; }
+      case 'plate': this.burst(e.x, e.y + 0.2, 14, 0xffe0a0, 2.5); break;
+      case 'symRight': { this.burst(e.x, e.y + 1.5, 12, this.symCols[this.sim.ents[e.id].sym] || 0xffffff, 2.5); break; }
+      case 'symWrong': this.shake = 0.15; for (const q of this.sim.ents) if (q.type === 'pedestal' && q.gid === e.gid) this.burst(q.x, q.y + 1.5, 6, 0xff4060, 1.8); break;
+      case 'solved': { for (const q of this.sim.ents) if (q.type === 'tablet' && q.gid === e.gid) this.burst(q.x + 1.5, q.y + 0.5, 24, 0xffe080, 4); break; }
+      case 'push': case 'pull': this.dust(e.x, e.y, 3, 0xd8b890); break;
+      case 'blockLand': this.dust(e.x, e.y, 6, 0xd8b890); this.shake = 0.08; break;
+      case 'blockReset': this.burst(e.x + 0.5, e.y + 0.5, 14, 0xc090ff, 2.5); break;
+      case 'hop': this.dust(e.x, e.y, 2); break;
       default: break;
     }
   }
@@ -525,9 +735,10 @@ export class Stage {
     let dy = want - this.plYaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
     this.plYaw += dy * Math.min(1, dt * 14);
     g.rotation.y = p.state === 'climb' ? Math.PI : this.plYaw;
-    const anim = { idle: 'Idle', run: 'Run', jump: 'Jump', fall: 'Fall', climb: 'Climb', swim: 'Swim', hurt: 'Hit', win: 'Cheer' }[p.state] || 'Idle';
+    const anim = { idle: 'Idle', run: 'Run', push: 'Run', jump: 'Jump', fall: 'Fall', climb: 'Climb', swim: 'Swim', hurt: 'Hit', win: 'Cheer' }[p.state] || 'Idle';
     if (this.landT > 0) this.landT -= gdt;
     if (p.dead > 0) this.pl.play('Hit', { once: true, fade: 0.1 });
+    else if (p.state === 'push') this.pl.play('Run', { speed: 0.42, fade: 0.2 });
     else if (anim === 'Run') this.pl.play('Run', { speed: 0.75 + 0.35 * Math.min(1, Math.abs(p.vx) / P.RUN), fade: this.landT > 0 ? 0.12 : 0.18 });
     else if (anim === 'Climb') this.pl.play('Climb', { speed: Math.abs(p.vy) > 0.2 || Math.abs(p.vx) > 0.2 ? 1.1 : 0.0001 });
     else if (anim === 'Jump') this.pl.play('Jump', { once: true, speed: 1.0, fade: 0.08 });
@@ -537,7 +748,7 @@ export class Stage {
     g.visible = p.dead > 0 ? Math.floor(this.time * 20) % 2 === 0 && p.dead > 0.6 : !(p.inv > 0 && Math.floor(this.time * 16) % 2 === 0);
     // swimming is done lying in the water; running leans a little into the speed
     g.position.y += p.state === 'swim' ? 0.42 : 0;
-    this.pl.root.rotation.x = p.state === 'run' ? Math.min(0.12, Math.abs(p.vx) * 0.014) : 0;
+    this.pl.root.rotation.x = p.state === 'run' ? Math.min(0.12, Math.abs(p.vx) * 0.014) : p.state === 'push' ? 0.3 : 0;
     this.pl.mixer.update(gdt);
     // blob shadow on the ground below
     const gy = S.groundTop(p.x, p.y + 0.5);
@@ -555,13 +766,46 @@ export class Stage {
         case 'coin': if (e.alive) { v.scale.x = 0.78 * Math.cos(this.time * 3 + e.x); v.position.y = e.y + Math.sin(this.time * 2 + e.x) * 0.06; } break;
         case 'papyrus': if (e.alive) { v.position.y = e.y + Math.sin(this.time * 2.2) * 0.12; v.children[1].material.opacity = 0.5 + Math.sin(this.time * 4) * 0.25; } break;
         case 'ankh': if (e.alive) v.position.y = e.y + Math.sin(this.time * 2.5) * 0.1; break;
-        case 'scarab': v.position.set(e.x, e.y, 0); v.rotation.y = e.dir > 0 ? 0 : Math.PI; v.userData.legs.forEach((l, i) => { l.rotation.z = Math.sin(this.time * 18 + i) * 0.5; }); break;
-        case 'bat': v.position.set(e.x, e.y, 0.2); v.rotation.y = e.dir > 0 ? 0 : Math.PI; v.userData.wings.forEach(({ piv, s }) => { piv.rotation.x = s * Math.sin(this.time * 16) * 0.8; }); break;
-        case 'mummy': {
-          v.position.set(e.x, e.y, 0); v.rotation.y = e.dir > 0 ? Math.PI / 2 - 0.3 : -Math.PI / 2 + 0.3;
-          const a = v.userData.actor; if (a) { a.mixer.update(gdt); for (const arm of v.userData.arms) if (arm) arm.rotation.x -= 1.2; }
+        case 'scarab': {
+          v.position.set(e.x, e.y + Math.abs(Math.sin(this.time * 12 + e.id)) * 0.04, 0);
+          v.rotation.y = e.dir > 0 ? -0.35 : Math.PI + 0.35;
+          const b = v.userData.beetle; if (b) b.rotation.z = Math.sin(this.time * 12 + e.id) * 0.06;
           break;
         }
+        case 'hopper': {
+          v.position.set(e.x, e.y, 0); v.rotation.y = e.dir > 0 ? -0.35 : Math.PI + 0.35;
+          const b = v.userData.beetle;
+          if (b) { const sq = e.air ? 1 + Math.min(0.25, Math.abs(e.vy) * 0.03) : 1 - Math.max(0, 0.25 - (e.hop || 0)) * 0.6; b.scale.set(0.85 / Math.sqrt(sq), 0.85 * sq, 0.85 / Math.sqrt(sq)); b.rotation.z = e.air ? -e.vy * 0.03 : 0; }
+          break;
+        }
+        case 'flyer': {
+          v.position.set(e.x, e.y, 0.3); v.rotation.y = e.dir > 0 ? -0.3 : Math.PI + 0.3;
+          v.userData.wings.forEach(({ piv, s: sg }) => { piv.rotation.x = sg * (0.5 + Math.sin(this.time * 26 + e.id) * 0.6); });
+          break;
+        }
+        case 'bat': v.position.set(e.x, e.y, 0.2); v.rotation.y = e.dir > 0 ? 0 : Math.PI; v.userData.wings.forEach(({ piv, s }) => { piv.rotation.x = s * Math.sin(this.time * 16) * 0.8; }); break;
+        case 'mummy': {
+          v.position.set(e.x, e.y, 0); v.rotation.y = e.dir > 0 ? Math.PI / 2 - 0.35 : -Math.PI / 2 + 0.35;
+          const a = v.userData.actor; if (a && Math.abs(e.x - this.cam.x) < 22) { a.mixer.update(gdt); if (v.userData.arms) for (const arm of v.userData.arms) if (arm) arm.rotation.x -= 1.2; }
+          break;
+        }
+        case 'itemblock': v.position.y = e.y + 0.5 + (e.bounce > 0 ? Math.sin((0.25 - e.bounce) / 0.25 * Math.PI) * 0.3 : 0); break;
+        case 'block': v.position.set(e.rx + 0.5, e.ry + 0.5, 0); break;
+        case 'gate': {
+          const u = v.userData;
+          if (u.opening && u.lift < e.h) { u.lift = Math.min(e.h, u.lift + dt * 2.6); v.position.x = e.x + 0.5 + (u.lift < e.h ? (Math.random() - 0.5) * 0.03 : 0); if (Math.random() < dt * 20) this.dust(e.x + 0.5 + (Math.random() - 0.5), e.y, 1, 0xd8b890); }
+          v.position.y = e.y + u.lift;
+          u.gem.rotation.y += dt * 2; break;
+        }
+        case 'lever': { const u = v.userData; const want = u.on ? -0.65 : 0.65; u.piv.rotation.z += (want - u.piv.rotation.z) * Math.min(1, dt * 10); u.halo.material.opacity = u.on ? 0.15 : 0.35 + Math.sin(this.time * 4) * 0.2; break; }
+        case 'plate': { const inl = v.userData.inlay; v.position.y = e.y - (e.held ? 0.07 : e.step ? 0.04 : 0); inl.material.emissiveIntensity = e.held ? 2.2 : 0.5 + Math.sin(this.time * 3) * 0.2; break; }
+        case 'pedestal': { const u = v.userData; u.glow.material.opacity = e.lit ? 0.75 + Math.sin(this.time * 5) * 0.15 : 0; u.plq.material.color.set(e.lit ? 0xffffff : 0xb8a890); u.plq.position.y = 1.55 + (e.lit ? Math.sin(this.time * 3) * 0.05 : 0); break; }
+        case 'power': {
+          v.visible = e.alive && !e.hidden;
+          if (v.visible) { v.position.y = e.y - (e.rise || 0) * 1.6 + Math.sin(this.time * 3 + e.id) * 0.08; v.userData.glow.material.opacity = 0.5 + Math.sin(this.time * 5) * 0.2; v.userData.glow.material.rotation = this.time; }
+          break;
+        }
+        case 'jar': break;
         case 'cobra': { v.rotation.y = e.dir > 0 ? 0 : Math.PI; const n = v.userData.neck; n.rotation.z = (e.strike > 0 ? -0.9 : Math.sin(this.time * 2) * 0.12); n.position.x = e.strike > 0 ? 0.35 : 0; break; }
         case 'mover': v.position.set(e.x + e.w / 2, e.y - 0.21, 0); break;
         case 'crusher': { const b = e.y - 1 - (e.k || 0) * e.drop; v.position.y = b; v.userData.chain.scale.y = 1 + (e.k || 0) * e.drop; v.userData.chain.position.y = 1 + ((e.k || 0) * e.drop + 1) / 2; break; }
@@ -598,6 +842,22 @@ export class Stage {
       if (B) { this.boulderView.position.set(B.x, B.y + 1.15, 0); this.boulderView.rotation.z = B.rot; if (B.active && Math.random() < dt * 14) this.dust(B.x - 0.8, B.y, 2); }
       if (!B) this.boulderView.visible = false;
     }
+    // the throwing stick
+    if (S.stick && !this.stickView) { this.stickView = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.A.img.pw_stickTex || null, transparent: true, depthWrite: false })); this.stickView.scale.set(0.85, 0.85, 1); this.level.add(this.stickView); }
+    if (this.stickView) {
+      this.stickView.visible = !!S.stick;
+      if (S.stick) { this.stickView.position.set(S.stick.x, S.stick.y, 0.5); this.stickView.material.rotation = -S.stick.rot * Math.sign(S.stick.vx || 1); if (Math.random() < dt * 30) this.spawn('glow', S.stick.x, S.stick.y, 0.4, { life: 0.25, size: 0.35, color: 0xffd080 }); }
+    }
+    // power-up effects around the explorer
+    if (this.fx) {
+      const w = S.pw, f = this.fx, cy = p.y + 0.75;
+      f.ring.visible = w.shield && p.dead <= 0; if (f.ring.visible) { f.ring.position.set(p.x, cy, 0.6); f.ring.material.rotation = this.time * 0.8; f.ring.material.opacity = 0.55 + Math.sin(this.time * 4) * 0.2; }
+      f.sun.visible = w.sun > 0 && p.dead <= 0 && (w.sun > 2 || Math.floor(this.time * 8) % 2 === 0);
+      if (w.sun > 0) { f.sun.position.set(p.x, cy, 0.4); f.sun.material.rotation = this.time * 2; if (Math.random() < dt * 25) this.spawn('sparkle', p.x + (Math.random() - 0.5) * 0.8, p.y + Math.random() * 1.4, 0.6, { vy: 1, life: 0.6, size: 0.3, color: 0xffd060 }); }
+      f.feather.visible = w.feather > 0 && p.dead <= 0 && (w.feather > 3 || Math.floor(this.time * 8) % 2 === 0);
+      if (f.feather.visible) { f.feather.position.set(p.x - p.face * 0.35, p.y + 1.75 + Math.sin(this.time * 3) * 0.06, 0.5); f.feather.material.rotation = 0.5 * p.face + (p.glide ? Math.sin(this.time * 9) * 0.2 : 0); }
+      if (p.glide && Math.random() < dt * 20) this.spawn('sparkle', p.x + (Math.random() - 0.5) * 0.6, p.y + 0.4, 0.5, { vy: -0.6, life: 0.5, size: 0.25, color: 0xe8e0ff });
+    }
     // animated materials
     if (this.waterTex) { this.waterTex.offset.x += dt * 0.04; this.waterTex.offset.y = Math.sin(this.time * 0.6) * 0.03; }
     if (this.sandTex) this.sandTex.offset.y -= dt * 0.03;
@@ -605,12 +865,15 @@ export class Stage {
 
     // camera: look ahead, smooth, clamp to the level
     const c = this.cam;
-    const tx = p.x + p.face * 1.6 + p.vx * 0.18, ty = p.y + 1.8;
+    // holding up or down on the pad while standing looks around; climbing looks ahead
+    this.look += ((this.lookY || 0) * 3.2 - this.look) * Math.min(1, dt * 2.5);
+    let tx = p.x + p.face * 1.6 + p.vx * 0.18, ty = p.y + 1.8 + this.look + (p.climb ? p.vy * 0.35 : 0) + (p.vy < -8 ? -1.5 : 0);
+    if (this.focus) { this.focus.t -= dt; if (this.focus.t <= 0) this.focus = null; else { tx = this.focus.x; ty = this.focus.y; } }
     c.x += (tx - c.x) * Math.min(1, dt * 3.2);
     c.y += (ty - c.y) * Math.min(1, dt * (ty < c.y ? 4.5 : 2.4));
     const halfH = Math.tan(THREE.MathUtils.degToRad(FOV / 2)) * c.dist, halfW = halfH * this.camera.aspect;
     c.x = Math.max(halfW - 0.5, Math.min(L.w - halfW + 0.5, c.x));
-    c.y = Math.max(halfH - 1.2, Math.min(H - halfH + 2, c.y));
+    c.y = Math.max(halfH - 1.2, Math.min(L.h - halfH + 2, c.y));
     let sx = 0, sy = 0;
     if (this.shake > 0) { this.shake -= dt; sx = (Math.random() - 0.5) * this.shake; sy = (Math.random() - 0.5) * this.shake; }
     this.camera.position.set(c.x + sx, c.y + sy + 3.4, c.dist);

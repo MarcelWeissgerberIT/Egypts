@@ -8,7 +8,8 @@ import { Audio } from '../../src/audio.js';
 const WORLD_MUSIC = { 0: 'halls', 1: 'halls', 2: 'halls', 3: 'water', 4: 'dark', 5: 'dark', 6: 'desert', 7: 'dark', 8: 'halls', 9: 'stars', 10: 'stars' };
 const WORLD_AMB = { 1: ['wind'], 2: ['wind'], 3: ['drips'], 4: ['wind', 'drips'], 5: ['drips', 'wind'], 6: ['wind'], 7: ['wind'], 8: ['wind'], 9: ['wind'], 10: ['wind', 'drips'] };
 const WORLD_VERB = { 1: 0.18, 2: 0.25, 3: 0.4, 4: 0.3, 5: 0.45, 6: 0.22, 7: 0.35, 8: 0.25, 9: 0.5, 10: 0.4 };
-const SAMPLES = ['s_coin', 's_secret', 's_door', 's_crack', 's_splash', 's_jump', 's_boulder', 's_land', 's_stomp', 'a_wind', 'a_drips', 'a_torch', 'fanfare'];
+const SAMPLES = ['s_coin', 's_secret', 's_door', 's_crack', 's_splash', 's_jump', 's_boulder', 's_land', 's_stomp', 'a_wind', 'a_drips', 'a_torch', 'fanfare',
+  's_power', 's_powerup', 's_lever', 's_gate', 's_jar', 's_push', 's_solved', 's_wrong', 's_throw', 's_mummy'];
 
 export class Sfx extends Audio {
   ensure() {
@@ -136,5 +137,22 @@ export class Sfx extends Audio {
   door() { this.play('s_door', { vol: 0.9, wet: 0.7 }) || this.tier(); }
   secret() { this.play('s_secret', { vol: 0.8, wet: 0.8 }) || this.ankh(); }
   fanfare() { if (!this.ctx || !this.buffers.fanfare) return; this.play('fanfare', { vol: 0.85, wet: 0.2 }); this.duckMusic(0.2, 0.2); setTimeout(() => this.duckMusic(1, 1.5), (this.buffers.fanfare.duration - 1) * 1000); }
+  // power-ups and puzzles
+  reveal() { this.play('s_power', { vol: 0.8, wet: 0.5 }) || this.ankh(); }
+  powerup() { if (!this.play('s_powerup', { vol: 0.85, wet: 0.4 })) { if (!this.ok()) return; const t = this.ctx.currentTime; [523, 659, 784, 1047].forEach((f, i) => this._tone(f, 'triangle', t + i * 0.06, 0.004, 0.14, 0.16)); } }
+  powerEnd() { if (!this.ok()) return; const t = this.ctx.currentTime; [784, 587, 440].forEach((f, i) => this._tone(f, 'sine', t + i * 0.08, 0.004, 0.1, 0.12)); }
+  shieldBreak() { if (!this.ok()) return; const t = this.ctx.currentTime; this._noise(t, 0.35, 0.3, 'highpass', 3000); const o = this._tone(1400, 'triangle', t, 0.002, 0.3, 0.18); o.frequency.exponentialRampToValueAtTime(500, t + 0.3); }
+  throwStick() { this.play('s_throw', { vol: 0.7, rate: 1.1, wet: 0.2 }) || this.dart(); }
+  lever() { this.play('s_lever', { vol: 0.9, wet: 0.5 }) || this.click(); }
+  gate() { this.play('s_gate', { vol: 1, wet: 0.7 }) || this.rumble(); }
+  jar() { this.play('s_jar', { vol: 0.85, rate: 0.95 + Math.random() * 0.1, wet: 0.4 }) || this.crack(); }
+  push() { this.play('s_push', { vol: 0.6, rate: 1.1 + Math.random() * 0.15, wet: 0.3 }) || this.rumble(); }
+  plate() { if (!this.ok()) return; const t = this.ctx.currentTime; this._tone(220, 'sine', t, 0.003, 0.25, 0.25); this._tone(330, 'sine', t + 0.08, 0.003, 0.25, 0.2); }
+  click() { if (!this.ok()) return; const t = this.ctx.currentTime; this._noise(t, 0.05, 0.25, 'bandpass', 2200, 3); }
+  symbol(step) { if (!this.ok()) return; const t = this.ctx.currentTime, f = [523, 659, 784, 988][Math.min(3, step - 1)] || 523; this._tone(f, 'triangle', t, 0.004, 0.5, 0.22); this._tone(f * 2, 'sine', t, 0.004, 0.4, 0.08); }
+  wrong() { this.play('s_wrong', { vol: 0.8, wet: 0.4 }) || this.invalid(); }
+  solved() { this.play('s_solved', { vol: 0.9, wet: 0.6 }) || this.secret(); }
+  groan(dist = 4) { this.play('s_mummy', { vol: Math.max(0.15, 0.7 - dist * 0.07), rate: 0.9 + Math.random() * 0.2, wet: 0.6 }); }
+  hop() { if (!this.ok()) return; const t = this.ctx.currentTime; const o = this._tone(260, 'sine', t, 0.003, 0.08, 0.08); o.frequency.exponentialRampToValueAtTime(520, t + 0.08); }
   duckMusic(level, time = 0.4) { if (this.musicGain) this.musicGain.gain.setTargetAtTime(0.42 * level, this.ctx.currentTime, time); }
 }

@@ -34,3 +34,24 @@ for (const [src, name] of [['ex_run', 'Run'], ['ex_jump', 'Jump'], ['ex_fall', '
   await io.write(path.join(OUT, 'anim_' + name.toLowerCase() + '.glb'), d);
   console.log(name, (fs.statSync(path.join(OUT, 'anim_' + name.toLowerCase() + '.glb')).size / 1024).toFixed(0) + 'KB');
 }
+
+// enemies: the beetle (Meta SAM 3D, simplified) and the mummy (rigged with a shuffling walk)
+{
+  const { simplify, weld } = await import('@gltf-transform/functions');
+  const { MeshoptSimplifier } = await import('meshoptimizer');
+  await MeshoptSimplifier.ready;
+  const J = path.join(ROOT, 'art/src/jump');
+  const b = await io.read(path.join(J, 'sam_scarab.glb'));
+  for (const m of b.getRoot().listMaterials()) { m.setAlphaMode('OPAQUE'); m.setDoubleSided(false); }
+  await b.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: 0.18, error: 0.004 }), dedup(), prune(),
+    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512], quality: 82 }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+  await io.write(path.join(OUT, 'beetle.glb'), b);
+  console.log('beetle', (fs.statSync(path.join(OUT, 'beetle.glb')).size / 1024).toFixed(0) + 'KB');
+  const m = await io.read(path.join(J, 'mummy_rig.glb'));
+  for (const mt of m.getRoot().listMaterials()) { mt.setAlphaMode('OPAQUE'); mt.setDoubleSided(false); }
+  for (const a of m.getRoot().listAnimations()) a.setName('Walk');
+  await m.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: 0.55, error: 0.003 }), dedup(), prune(), resample(),
+    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512], quality: 82 }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+  await io.write(path.join(OUT, 'mummy.glb'), m);
+  console.log('mummy', (fs.statSync(path.join(OUT, 'mummy.glb')).size / 1024).toFixed(0) + 'KB');
+}

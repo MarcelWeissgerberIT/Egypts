@@ -40,7 +40,9 @@ export class UI {
     this.coinChip = el('div', { class: 'chip', id: 'coinChip' }, `${img('icon_scarab.webp')}<div class="digits"></div>`);
     this.papyri = el('div', { id: 'papyri' }, [0, 1, 2].map(() => img('papyrus.webp', 'off')).join(''));
     this.lvl = el('div', { id: 'lvl' }, `${img('medallion.webp')}<div class="digits"></div>`);
-    const left = el('div', { class: 'grp' }); left.append(this.bPause, this.hearts);
+    // active power-ups: amulet, throwing stick, feather and sun (the last two with a running-out ring)
+    this.powers = el('div', { id: 'powers' }, ['shield', 'stick', 'feather', 'sun'].map((k) => `<div class="pw ${k}" style="display:none"><img src="${U('pw_' + k + '.webp')}"><i></i></div>`).join(''));
+    const left = el('div', { class: 'grp' }); left.append(this.bPause, this.hearts, this.powers);
     const right = el('div', { class: 'grp' }); right.append(this.papyri, this.coinChip, this.lvl);
     this.hud.append(left, right);
     A.append(this.hud);
@@ -116,6 +118,17 @@ export class UI {
   setCoins(n) { const h = digitsHTML(n, 22); if (this._set('c', h)) this.coinChip.querySelector('.digits').innerHTML = h; }
   setPapyri(found) { const k = found.map((f) => (f ? 1 : 0)).join(''); if (!this._set('p', k)) return; [...this.papyri.children].forEach((e, i) => e.classList.toggle('off', !found[i])); }
   setLevel(n) { this.lvl.querySelector('.digits').innerHTML = digitsHTML(n, n > 99 ? 15 : 19); }
+  setPowers(w) {
+    const k = `${w.shield ? 1 : 0}${w.stick ? 1 : 0}${Math.ceil(w.feather * 2)}|${Math.ceil(w.sun * 2)}`;
+    if (!this._set('pw', k)) return;
+    const [s, st, f, su] = this.powers.children;
+    s.style.display = w.shield ? '' : 'none';
+    st.style.display = w.stick ? '' : 'none';
+    f.style.display = w.feather > 0 ? '' : 'none'; f.style.setProperty('--left', Math.max(0, w.feather / 25));
+    su.style.display = w.sun > 0 ? '' : 'none'; su.style.setProperty('--left', Math.max(0, w.sun / 10));
+    f.classList.toggle('low', w.feather > 0 && w.feather < 4); su.classList.toggle('low', w.sun > 0 && w.sun < 2.5);
+  }
+  powerPop(kind) { const e = this.powers.querySelector('.' + kind); if (!e) return; e.classList.remove('pop'); void e.offsetWidth; e.classList.add('pop'); }
   bumpPapyrus(i) { const e = this.papyri.children[i]; e.classList.remove('pop'); void e.offsetWidth; e.classList.add('pop'); }
   bumpCoins() { this.coinChip.classList.remove('pop'); void this.coinChip.offsetWidth; this.coinChip.classList.add('pop'); }
 

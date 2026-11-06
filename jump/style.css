@@ -25,6 +25,14 @@ img { -webkit-user-drag: none; user-select: none; pointer-events: none; display:
 .chip.pop, #papyri img.pop { animation: pop .35s; }
 @keyframes pop { 50% { transform: scale(1.3); } }
 #papyri { display: flex; gap: 2px; }
+#powers { display: flex; gap: 4px; }
+#powers .pw { position: relative; width: 40px; height: 40px; border-radius: 50%; background: rgba(36,10,64,.82); border: 2px solid #e6b54a; box-shadow: 0 0 10px rgba(255,210,120,.45); --left: 1; }
+#powers .pw img { position: absolute; inset: 3px; width: 30px; height: 30px; object-fit: contain; }
+#powers .pw i { position: absolute; inset: -5px; border-radius: 50%; pointer-events: none; background: conic-gradient(#ffd25a calc(var(--left) * 360deg), rgba(0,0,0,0) 0); -webkit-mask: radial-gradient(circle, transparent 23px, #000 24px); mask: radial-gradient(circle, transparent 23px, #000 24px); }
+#powers .pw.shield i, #powers .pw.stick i { display: none; }
+#powers .pw.low { animation: blink .4s steps(2) infinite; }
+#powers .pw.pop { animation: pop .45s; }
+@keyframes blink { 50% { opacity: .35; } }
 #papyri img { width: 38px; height: 38px; object-fit: contain; transition: filter .3s; }
 #papyri img.off { filter: grayscale(1) brightness(.75) opacity(.38); }
 #lvl { position: relative; width: 46px; height: 46px; }
@@ -152,6 +160,7 @@ img { -webkit-user-drag: none; user-select: none; pointer-events: none; display:
 #hand.jump { right: calc(var(--sar) + 42px); bottom: calc(var(--sab) + 4px); animation: handTap .8s ease-in-out infinite; }
 #hand.action { right: calc(var(--sar) + 146px); bottom: calc(var(--sab) - 46px); animation: handTap .8s ease-in-out infinite; }
 #hand.climb { left: calc(var(--sal) + 72px); bottom: calc(var(--sab) + 40px); animation: handTap .8s ease-in-out infinite; }
+#hand.down { left: calc(var(--sal) + 72px); bottom: calc(var(--sab) - 70px); animation: handTap .8s ease-in-out infinite; }
 @keyframes handMove { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(46px); } }
 @keyframes handTap { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(14px) scale(.92); } }
 @keyframes handUp { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-44px); } }

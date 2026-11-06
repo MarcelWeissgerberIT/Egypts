@@ -13,10 +13,12 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
 
 ## Steuerung (Touch, wie beim Game Boy)
 
-* **Steuerkreuz links unten:** laufen, Leitern hoch/runter, „runter“ + Springen fällt durch Holzplanken.
+* **Steuerkreuz links unten:** laufen, Leitern hoch und runter (oben auf der Leiter „runter“ drücken),
+  „runter“ + Springen fällt durch Holzplanken, im Stehen hoch/runter halten schaut nach oben/unten.
   Der Daumen kann über das Kreuz gleiten (8 Richtungen), jede Berührung der linken Hälfte zählt.
 * **A (Pfeil, rechts oben):** Springen, länger halten = höher. Großzügige Sprungtoleranz.
-* **B (Hand, links unten davon):** rissige Steine aufbrechen (leuchtet, wenn einer in der Nähe ist).
+* **B (Hand, links unten davon):** rissige Steine aufbrechen, Hebel ziehen, Symbolsäulen drücken,
+  Krüge zerschlagen, Steinblöcke heranziehen, das Wurfholz werfen. B leuchtet, wenn es etwas zu tun gibt.
   Der Daumen kann von B auf A rutschen. Jede Berührung der rechten Hälfte zählt für den näheren Knopf.
 * Auf dem Rechner: Pfeiltasten/WASD, Leertaste, E.
 
@@ -39,15 +41,35 @@ Treffer, Jubeln). Im Spiel gibt es keine Schrift: jede Zahl und jeder Knopf ist 
   Lautlos-Schalter es auf neueren iOS-Versionen (ab 17) nicht stummschaltet.
 * Am besten quer halten und über „Teilen → Zum Home-Bildschirm“ als Vollbild-App starten.
 
+## Gegner, Power-ups, Rätsel, Aufstiege
+
+* **Gegner ab dem ersten Level:** Skarabäen (Meta SAM 3D aus einem Higgsfield-Bild), Mumien (SAM 3D,
+  von Meshy geriggt, schlurfender Gang, zweimal draufspringen), hüpfende Käfer, geflügelte Käfer,
+  Fledermäuse und Kobras. Draufspringen, Wurfholz oder Sonnenscheibe besiegen sie.
+* **Power-ups** stecken in **Glyphen-Blöcken** (von unten dagegen springen) und in **Tonkrügen**
+  (B oder draufspringen); oben links zeigt die Leiste, was aktiv ist:
+  * Skarabäus-Amulett: fängt einen Treffer ab
+  * Wurfholz: B wirft es, es kehrt zurück und besiegt Gegner
+  * Ibisfeder: höher springen, mit gehaltenem A langsam herabschweben (25 s)
+  * Sonnenscheibe: unverwundbar und schneller, Gegner vergehen bei Berührung (10 s)
+* **Rätsel** hinter Steintoren (die Farbe des Edelsteins verbindet Tor und Auslöser, das Bild schwenkt
+  zum Tor, wenn es sich öffnet):
+  * Hebel auf einem Sims, in einer Grube oder hinter Stufen
+  * Steinblock auf die Druckplatte schieben (B zieht ihn zurück, falls er festsitzt)
+  * Symbolreihenfolge: eine Tafel zeigt drei bis vier Zeichen (Ankh, Lotus, Djed, Falke); die Säulen
+    stehen in anderer Reihenfolge, falsch gedrückt setzt alles zurück
+* **Aufstiege:** hohe Kammern mit Simsen, Leitern und Aufzügen führen nach oben, der Weg geht dort
+  weiter; Leitern und Abstiege führen wieder hinunter. Jedes fünfte Level ist ein großer Aufstieg.
+
 ## 10 Welten × 10 Level
 
 | Welt | Ort | Neu |
 |---|---|---|
-| 1 | Sonnige Eingangshalle | Laufen, Springen, Gruben, Stacheln |
-| 2 | Hieroglyphenhalle | Leitern, bröckelnde Steine, Skarabäen (draufspringen) |
+| 1 | Sonnige Eingangshalle | Laufen, Springen, Gruben, Stacheln, Skarabäen, Mumien, erste Rätsel |
+| 2 | Hieroglyphenhalle | Leitern, bröckelnde Steine, hüpfende Käfer |
 | 3 | Überflutete Zisterne | Schwimmen, schwebende Steinplatten |
-| 4 | Skarabäennest | Fledermäuse, Pfeilfallen |
-| 5 | Mumiengruft (dunkel) | Laterne, Mumien (zweimal draufspringen) |
+| 4 | Skarabäennest | Fledermäuse, geflügelte Käfer, Pfeilfallen |
+| 5 | Mumiengruft (dunkel) | Laterne, viele Mumien |
 | 6 | Sandfälle | Treibsand, Sandströme, rollender Felsbrocken |
 | 7 | Fallenkammern | Stampfer, Feuerdüsen, Aufzüge |
 | 8 | Schatzkammer | **Doppelsprung** (goldene Sandalen), Kobras |
@@ -61,8 +83,9 @@ abrufbar. Ankh-Herzen: drei Treffer, dann geht es am letzten Obelisken (Kontroll
 
 Die Level werden aus festen Bausteinen mit festem Startwert erzeugt (gleiches Level bei jedem Spiel).
 `tools/check_levels.mjs` spielt jedes Level mit der echten Spielphysik durch (Rennen, Springen, kurze
-Hüpfer, Doppelsprung, Leitern, Schwimmen) und prüft, dass Ausgang und alle drei Papyri erreichbar
-sind: alle 100 Level bestehen.
+Hüpfer, Doppelsprung, Leitern hoch und runter, Schwimmen) und prüft, dass Ausgang und alle drei Papyri
+erreichbar sind; Tore gelten erst als offen, wenn ihr Hebel, Block und Druckplatte oder alle Symbolsäulen
+erreichbar sind: alle 100 Level bestehen.
 
 ## Entwickeln
 
@@ -76,9 +99,9 @@ node tools/check_levels.mjs
 | Ordner | Inhalt |
 |---|---|
 | `jump/src/` | Jump & Run: `levels.js` Welten und Levelgenerator, `sim.js` Physik/Gegner/Fallen, `render.js` 2.5D-Grafik (Three.js), `input.js` Touch, `ui.js` bildbasierte Oberfläche, `main.js` Ablauf |
-| `jump/assets/` | Hintergründe, Steintafeln, Texturen, Knöpfe, Forscherin (meshopt-GLB) |
+| `jump/assets/` | Hintergründe, Steintafeln, Texturen, Knöpfe, Power-ups, Symbole, Forscherin, Mumie, Käfer (meshopt-GLB), Klänge |
 | `src/`, `public/` | der Pyramiden-Bauplatz (erstes Spiel) |
-| `tools/` | Build, Bild-/Modell-Aufbereitung, Levelprüfung, Balancing |
+| `tools/` | Build, Bild-/Modell-/Klang-Aufbereitung, Levelprüfung, Balancing |
 
 ---
 
